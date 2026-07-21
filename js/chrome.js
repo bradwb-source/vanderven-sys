@@ -92,16 +92,47 @@
 
   const toggle = document.querySelector(".nav-toggle");
   const primaryNav = document.getElementById("primary-nav");
+  let lockedScrollY = 0;
+
+  const setMediaPaused = (paused) => {
+    document.querySelectorAll("video").forEach((video) => {
+      if (paused) {
+        video.pause();
+        return;
+      }
+      if (video.hasAttribute("autoplay") || video.closest(".video-band, .hero__media")) {
+        const play = video.play();
+        if (play && typeof play.catch === "function") play.catch(() => {});
+      }
+    });
+  };
+
+  const setNavOpen = (open) => {
+    if (open) {
+      lockedScrollY = window.scrollY || window.pageYOffset;
+      document.body.style.top = `-${lockedScrollY}px`;
+      document.body.classList.add("nav-open");
+      setMediaPaused(true);
+    } else {
+      document.body.classList.remove("nav-open");
+      document.body.style.top = "";
+      window.scrollTo(0, lockedScrollY);
+      setMediaPaused(false);
+    }
+    if (toggle) toggle.setAttribute("aria-expanded", open ? "true" : "false");
+  };
+
   if (toggle && primaryNav) {
     toggle.addEventListener("click", () => {
-      const open = document.body.classList.toggle("nav-open");
-      toggle.setAttribute("aria-expanded", open ? "true" : "false");
+      setNavOpen(!document.body.classList.contains("nav-open"));
     });
     primaryNav.querySelectorAll("a").forEach((a) => {
-      a.addEventListener("click", () => {
-        document.body.classList.remove("nav-open");
-        toggle.setAttribute("aria-expanded", "false");
-      });
+      a.addEventListener("click", () => setNavOpen(false));
+    });
+    window.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && document.body.classList.contains("nav-open")) {
+        setNavOpen(false);
+      }
     });
   }
 })();

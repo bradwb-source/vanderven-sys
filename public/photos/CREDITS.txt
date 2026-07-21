@@ -66,3 +66,42 @@ TRADES PAGE (unique — not home mosaic)
   trades-plant.jpg — Pexels 1301856
   trades-garden.jpg — Pexels 5891618
   trades-beds.jpg — Pexels 4506252
+
+PROPERTY PAGE
+  pm-complex.jpg — Pexels 439391
+  pm-apt.jpg — Pexels 323780
+  pm-keys.jpg — Pexels 8293778
+  pm-balcony.jpg — Pexels 323705
+  pm-lobby.jpg — Pexels 1571468
+  pm-kitchen.jpg — Pexels 2724749
+
+SERVICES PAGE
+  svc-laptop.jpg — Pexels 1181244
+  svc-desk.jpg — Pexels 7688336
+  svc-plan.jpg — Pexels 3184292
+  svc-content.jpg — Pexels 6476589
+  svc-phone.jpg — Pexels 5053740
+  svc-meeting.jpg — Pexels 3184465
+  svc-screen.jpg — Pexels 196644
+  svc-notes.jpg — Pexels 669615
+  svc-tablet.jpg — Pexels 265087
+
+PROFESSIONAL PAGE
+  pro-consult.jpg — Pexels 5668858
+  pro-reception.jpg — Pexels 1170412
+  pro-meeting.jpg — Pexels 1181406
+  pro-advisor.jpg — Pexels 3760067
+  pro-lobby.jpg — Pexels 269077
+  pro-notes.jpg — Pexels 7821702
+  pro-client.jpg — Pexels 3205570
+
+REAL ESTATE PAGE
+  re-exterior.jpg — Pexels 106399
+  re-living.jpg — Pexels 1571463
+  re-keys.jpg — Pexels 7578986
+  re-open.jpg — Pexels 1396122
+  re-sign.jpg — Pexels 280222
+  re-view.jpg — Pexels 259588
+  re-kitchen.jpg — Pexels 1080721
+
+  re-canada-home.jpg — Wikimedia Commons: Kitsilano House and Garden, Vancouver BC
