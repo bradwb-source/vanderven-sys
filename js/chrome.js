@@ -57,7 +57,7 @@
           <em>Systems</em>
         </span>
       </a>
-      <p>Websites, automation &amp; marketing for real estate, property management, professional services &amp; trades across the Okanagan.</p>
+      <p>Websites, AI automation &amp; marketing for real estate, property management, professional services &amp; trades across the Okanagan.</p>
     </div>
     <div class="site-footer__cols">
       <nav class="site-footer__nav" aria-label="Industries">
@@ -109,14 +109,21 @@
 
   const setNavOpen = (open) => {
     if (open) {
-      lockedScrollY = window.scrollY || window.pageYOffset;
+      lockedScrollY = window.scrollY || window.pageYOffset || 0;
       document.body.style.top = `-${lockedScrollY}px`;
       document.body.classList.add("nav-open");
       setMediaPaused(true);
     } else {
+      const y = lockedScrollY;
       document.body.classList.remove("nav-open");
       document.body.style.top = "";
-      window.scrollTo(0, lockedScrollY);
+      // Instant restore — html { scroll-behavior: smooth } would otherwise
+      // animate from the top back down to the locked position.
+      const html = document.documentElement;
+      const previousBehavior = html.style.scrollBehavior;
+      html.style.scrollBehavior = "auto";
+      window.scrollTo(0, y);
+      html.style.scrollBehavior = previousBehavior;
       setMediaPaused(false);
     }
     if (toggle) toggle.setAttribute("aria-expanded", open ? "true" : "false");

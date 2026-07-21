@@ -544,21 +544,9 @@ body.nav-open .nav-toggle__bar:nth-child(2) {
   }
 }
 
-.hero__brand {
-  margin: 0 0 1.75rem;
-  width: min(22rem, 78vw);
-}
-
-.hero__brand img {
-  width: 100%;
-  height: auto;
-  /* Lockup ships on black — blend so the plate disappears into the hero */
-  mix-blend-mode: screen;
-}
-
 .hero__headline {
-  margin: 0 0 1rem;
-  max-width: 16ch;
+  margin: 0 0 1.15rem;
+  max-width: 18ch;
   font-family: var(--font-display);
   font-size: clamp(2.4rem, 5.5vw, 4rem);
   font-weight: 500;
@@ -566,9 +554,28 @@ body.nav-open .nav-toggle__bar:nth-child(2) {
   letter-spacing: -0.01em;
 }
 
+.hero__headline-break {
+  display: block;
+  height: 0.2em;
+}
+
+.hero__headline-line {
+  display: inline-block;
+}
+
+@media (min-width: 860px) {
+  .hero__headline {
+    max-width: none;
+  }
+
+  .hero__headline-line {
+    white-space: nowrap;
+  }
+}
+
 .hero__support {
   margin: 0 0 2rem;
-  max-width: 32ch;
+  max-width: 36ch;
   font-family: var(--font-display);
   font-size: clamp(1.15rem, 2vw, 1.4rem);
   font-weight: 500;
