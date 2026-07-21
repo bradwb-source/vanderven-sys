@@ -1,0 +1,7 @@
+.cursor/
+public/photos/_fresh/
+.DS_Store
+assets/
+.wrangler/
+.dev.vars
+node_modules/
