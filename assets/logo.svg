@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 230" fill="none" aria-hidden="true">
+  <path d="M100 8C134 8 172 18 180 30V104C180 164 140 204 100 224C60 204 20 164 20 104V30C28 18 66 8 100 8Z" stroke="currentColor" stroke-width="3.5" fill="none"/>
+  <path d="M100 22C130 22 160 30 166 40V104C166 156 132 190 100 206C68 190 34 156 34 104V40C40 30 70 22 100 22Z" stroke="currentColor" stroke-width="1.75" fill="none"/>
+  <path class="logo-v-fill" d="M 45.85 101.61 C 47.08 101.83 89.74 115.81 100.00 118.39 C 110.26 120.97 108.62 117.31 107.38 117.10 C 106.15 116.88 102.46 119.46 92.62 117.10 C 82.77 114.73 47.08 102.69 48.31 102.90 Z" fill="currentColor"/>
+</svg>

@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Contact | Vanderven Systems</title>
+    <meta
+      name="description"
+      content="Book a free automation audit with Vanderven Systems. Tell us how your work runs. We’ll show you what to fix first."
+    />
+    <link rel="icon" href="public/favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" sizes="32x32" href="public/favicon-32.png" />
+    <link rel="apple-touch-icon" href="public/apple-touch-icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Outfit:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="css/styles.css" />
+  </head>
+  <body data-page="contact">
+    <div id="site-header"></div>
+
+    <main>
+      <header class="page-hero page-hero--contact">
+        <div class="container">
+          <p class="page-hero__eyebrow">Contact</p>
+          <h1 class="page-hero__title">Book a free audit.</h1>
+          <p class="page-hero__lead">
+            Walk us through one real job, from first inquiry to paid. We’ll map where it stalls and what to fix
+            first. No hard pitch.
+          </p>
+        </div>
+      </header>
+
+      <section class="section">
+        <div class="container contact-layout reveal">
+          <aside class="form-guide">
+            <p class="eyebrow">What helps</p>
+            <h2 class="form-guide__title">A useful note looks like this.</h2>
+            <p class="form-guide__lead">
+              You don’t need a polished brief. A few concrete details beat a long pitch.
+            </p>
+            <ul class="form-guide__list">
+              <li>How a lead usually reaches you (call, text, form, referral)</li>
+              <li>Where things stall (slow reply, quotes going quiet, no-shows, unpaid invoices)</li>
+              <li>Tools you already use (CRM, calendar, books, messaging)</li>
+              <li>What “better” would look like in the next 30 days</li>
+            </ul>
+            <p class="form-guide__examples">
+              <span>Examples</span>
+              “Missed after-hours calls on HVAC jobs.” “Listing inquiries sit until Sunday.” “Tenants email
+              maintenance and nothing routes.” “Quotes go out and die in the inbox.”
+            </p>
+          </aside>
+
+          <form class="form" id="contact-form" novalidate>
+            <div class="form__fields">
+              <div class="form__row">
+                <label>
+                  Name
+                  <input type="text" name="name" autocomplete="name" required placeholder="Jordan Lee" />
+                </label>
+                <label>
+                  Business
+                  <input
+                    type="text"
+                    name="business"
+                    autocomplete="organization"
+                    required
+                    placeholder="Valley Mechanical Ltd."
+                  />
+                </label>
+              </div>
+              <div class="form__row">
+                <label>
+                  Email
+                  <input
+                    type="email"
+                    name="email"
+                    autocomplete="email"
+                    required
+                    placeholder="you@yourbusiness.ca"
+                  />
+                </label>
+                <label>
+                  Phone
+                  <input type="tel" name="phone" autocomplete="tel" placeholder="(250) 555-0142" />
+                </label>
+              </div>
+              <div class="form__row">
+                <label>
+                  Industry
+                  <select name="industry" required>
+                    <option value="" selected disabled>Select one</option>
+                    <option>Real estate</option>
+                    <option>Property management</option>
+                    <option>Professional services</option>
+                    <option>Trades / HVAC / plumbing / electrical</option>
+                    <option>Lawn care / landscaping / seasonal</option>
+                    <option>Construction / renovation</option>
+                    <option>Other</option>
+                  </select>
+                </label>
+                <label>
+                  Website
+                  <input
+                    type="url"
+                    name="website"
+                    autocomplete="url"
+                    placeholder="https://yoursite.ca (optional)"
+                  />
+                </label>
+              </div>
+              <div class="form__row">
+                <label>
+                  Where should we start?
+                  <select name="focus" required>
+                    <option value="" selected disabled>Select one</option>
+                    <option>Website / online presence</option>
+                    <option>Automation &amp; follow-up</option>
+                    <option>Marketing &amp; content</option>
+                    <option>Full stack (site + systems + marketing)</option>
+                    <option>Not sure. Help me decide.</option>
+                  </select>
+                </label>
+                <label>
+                  Best way to reach you
+                  <select name="preferred_contact">
+                    <option value="" selected disabled>Select one</option>
+                    <option>Email</option>
+                    <option>Phone / text</option>
+                    <option>Either works</option>
+                  </select>
+                </label>
+              </div>
+              <label>
+                What’s getting in the way?
+                <span class="form__hint">
+                  Pick one real job if you can. Inquiry → reply → quote → booked → paid.
+                </span>
+                <textarea
+                  name="message"
+                  required
+                  placeholder="Example: Most jobs come in by phone while we’re on site. Quotes go out the same day, then sit for a week with no follow-up. Invoices often wait until Friday night. We use Google Calendar and email. Want faster first response and quotes that don’t die."
+                ></textarea>
+              </label>
+              <p class="form__note">
+                We usually reply within one business day. The audit is free and stays focused on your workflow.
+              </p>
+              <button class="btn btn--gold" type="submit">Request audit</button>
+            </div>
+            <p class="form__thanks">Thank you. We’ll be in touch shortly.</p>
+          </form>
+        </div>
+      </section>
+    </main>
+
+    <div id="site-footer"></div>
+    <script src="js/chrome.js"></script>
+    <script src="js/main.js"></script>
+  </body>
+</html>
