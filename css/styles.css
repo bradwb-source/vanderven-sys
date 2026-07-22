@@ -1001,16 +1001,18 @@ body.nav-open .nav-toggle__bar:nth-child(2) {
 .video-band {
   position: relative;
   margin: 0;
-  min-height: clamp(18rem, 48vw, 34rem);
-  overflow: clip;
+  /* Match 16:9 source so cover doesn't crop into a tight zoom */
+  height: clamp(18rem, 56.25vw, 42rem);
+  overflow: hidden;
   background: var(--ink);
 }
 
 .video-band video,
 .video-band img {
   width: 100%;
-  height: clamp(18rem, 48vw, 34rem);
+  height: 100%;
   object-fit: cover;
+  object-position: center 42%;
   display: block;
 }
 
