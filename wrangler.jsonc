@@ -1,12 +1,29 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "vanderven-sys",
+  "main": "src/worker.js",
   "compatibility_date": "2026-07-21",
   "observability": {
     "enabled": true
   },
   "assets": {
     "directory": ".",
-    "not_found_handling": "404-page"
-  }
+    "binding": "ASSETS",
+    "not_found_handling": "404-page",
+    "run_worker_first": [
+      "/api/*",
+      "/login",
+      "/login.html",
+      "/app",
+      "/app/*"
+    ]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "vanderven-crm",
+      "database_id": "00000000-0000-4000-8000-000000000001",
+      "migrations_dir": "migrations"
+    }
+  ]
 }

@@ -1,0 +1,3 @@
+# Local CRM secrets for `wrangler dev` (copy to .dev.vars)
+CRM_PASSWORD=vanderven-demo
+SESSION_SECRET=change-me-to-a-long-random-string

@@ -1,13 +1,40 @@
 (() => {
   const form = document.getElementById("contact-form");
   if (form) {
-    form.addEventListener("submit", (event) => {
+    form.addEventListener("submit", async (event) => {
       event.preventDefault();
       if (!form.checkValidity()) {
         form.reportValidity();
         return;
       }
-      form.classList.add("is-sent");
+
+      const submit = form.querySelector('button[type="submit"]');
+      const original = submit ? submit.textContent : "";
+      if (submit) {
+        submit.disabled = true;
+        submit.textContent = "Sending…";
+      }
+
+      const data = Object.fromEntries(new FormData(form).entries());
+
+      try {
+        const res = await fetch("/api/public/leads", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data),
+        });
+        if (!res.ok) {
+          const payload = await res.json().catch(() => ({}));
+          throw new Error(payload.error || "Could not send.");
+        }
+        form.classList.add("is-sent");
+      } catch (err) {
+        alert(err.message || "Something went wrong. Please email hello@vandervensystems.com.");
+        if (submit) {
+          submit.disabled = false;
+          submit.textContent = original || "Request audit";
+        }
+      }
     });
   }
 

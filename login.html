@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sign in | Vanderven Systems</title>
+    <meta name="robots" content="noindex,nofollow" />
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/app/app.css" />
+  </head>
+  <body class="login-page">
+    <main class="login-shell">
+      <div class="login-card">
+        <div class="login-brand">
+          <img src="/public/logo-mark-nav.png" alt="" width="48" height="29" />
+          <div>
+            <strong>Vanderven</strong>
+            <span>CRM</span>
+          </div>
+        </div>
+        <h1>Sign in</h1>
+        <p class="login-lead">Private workspace for leads and pipeline.</p>
+        <form id="login-form" class="login-form" novalidate>
+          <label>
+            Password
+            <input
+              type="password"
+              name="password"
+              autocomplete="current-password"
+              required
+              autofocus
+              placeholder="Enter CRM password"
+            />
+          </label>
+          <p id="login-error" class="form-error" hidden></p>
+          <button type="submit" class="btn btn-primary">Continue</button>
+        </form>
+        <p class="login-foot"><a href="/">Back to site</a></p>
+      </div>
+    </main>
+    <script>
+      (() => {
+        const form = document.getElementById("login-form");
+        const errorEl = document.getElementById("login-error");
+        const params = new URLSearchParams(location.search);
+        const next = params.get("next") || "/app/";
+
+        form.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          errorEl.hidden = true;
+          const password = new FormData(form).get("password");
+          const btn = form.querySelector("button");
+          btn.disabled = true;
+          btn.textContent = "Signing in…";
+          try {
+            const res = await fetch("/api/login", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              credentials: "same-origin",
+              body: JSON.stringify({ password }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+              errorEl.textContent = data.error || "Could not sign in.";
+              errorEl.hidden = false;
+              btn.disabled = false;
+              btn.textContent = "Continue";
+              return;
+            }
+            location.href = next.startsWith("/") ? next : "/app/";
+          } catch {
+            errorEl.textContent = "Network error. Try again.";
+            errorEl.hidden = false;
+            btn.disabled = false;
+            btn.textContent = "Continue";
+          }
+        });
+      })();
+    </script>
+  </body>
+</html>

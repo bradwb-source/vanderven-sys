@@ -11,3 +11,9 @@ wrangler.toml
 README.md
 assets
 public/photos/_fresh
+src
+migrations
+package.json
+package-lock.json
+.dev.vars
+.wrangler
