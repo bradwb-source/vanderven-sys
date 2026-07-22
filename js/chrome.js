@@ -26,7 +26,7 @@
 <header class="site-header${solid ? " site-header--solid" : ""}">
   <div class="container site-header__inner">
     <a class="nav-logo" href="index.html" aria-label="Vanderven Systems home">
-      <img class="nav-logo__mark" src="public/logo-mark-nav.png" alt="" width="123" height="74" />
+      <img class="nav-logo__mark" src="/public/logo-mark-nav.png" alt="" width="123" height="74" />
       <span class="nav-logo__word">
         <strong>Vanderven</strong>
         <span>Systems</span>
@@ -51,7 +51,7 @@
   <div class="container site-footer__inner">
     <div class="site-footer__brand">
       <a class="site-footer__logo" href="index.html" aria-label="Vanderven Systems home">
-        <img src="public/logo-mark-nav.png" alt="" width="123" height="74" />
+        <img src="/public/logo-mark-nav.png" alt="" width="123" height="74" />
         <span>
           <strong>Vanderven</strong>
           <em>Systems</em>

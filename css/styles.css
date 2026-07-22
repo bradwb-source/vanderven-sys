@@ -727,6 +727,20 @@ body.nav-open .nav-toggle__bar:nth-child(2) {
   line-height: 1.08;
 }
 
+.page-hero__title--pair {
+  max-width: none;
+}
+
+.page-hero__title-line {
+  display: block;
+}
+
+@media (min-width: 700px) {
+  .page-hero__title-line {
+    white-space: nowrap;
+  }
+}
+
 .page-hero__lead {
   margin: 0;
   max-width: 34ch;
@@ -797,8 +811,12 @@ body.nav-open .nav-toggle__bar:nth-child(2) {
   position: relative;
   margin: 0;
   aspect-ratio: 3 / 2;
-  overflow: clip;
-  background: var(--panel);
+  overflow: hidden;
+  background-color: var(--panel);
+  background-image: var(--media, none);
+  background-size: cover;
+  background-position: center;
+  min-height: 12rem;
 }
 
 .split__media img {
@@ -809,6 +827,7 @@ body.nav-open .nav-toggle__bar:nth-child(2) {
   max-width: none;
   object-fit: cover;
   object-position: center;
+  display: block;
 }
 
 .prose {
@@ -1059,7 +1078,7 @@ body.nav-open .nav-toggle__bar:nth-child(2) {
   position: relative;
   margin: 0;
   aspect-ratio: 3 / 2;
-  overflow: clip;
+  overflow: hidden;
   background: var(--panel);
 }
 

@@ -9,11 +9,11 @@
       content="Websites, AI automation, marketing, and ongoing care for real estate, property management, professional services, and trades across the Okanagan."
     />
     <link rel="icon" href="/favicon.ico" sizes="any" />
-    <link rel="icon" href="public/favicon.ico" sizes="any" />
-    <link rel="icon" type="image/png" sizes="32x32" href="public/favicon-32.png" />
-    <link rel="icon" type="image/png" sizes="192x192" href="public/favicon-192.png" />
-    <link rel="apple-touch-icon" href="public/apple-touch-icon.png" />
-    <link rel="manifest" href="site.webmanifest" />
+    <link rel="icon" href="/public/favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/public/favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/public/favicon-192.png" />
+    <link rel="apple-touch-icon" href="/public/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
     <meta name="theme-color" content="#141820" />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Vanderven Systems" />
@@ -34,7 +34,7 @@
       href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Outfit:wght@400;500;600&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="css/styles.css" />
+    <link rel="stylesheet" href="/css/styles.css" />
   </head>
   <body data-page="services">
     <div id="site-header"></div>
@@ -43,7 +43,10 @@
       <header class="page-hero page-hero--services">
         <div class="container">
           <p class="page-hero__eyebrow">Services</p>
-          <h1 class="page-hero__title">Practical systems. Refined presence.</h1>
+          <h1 class="page-hero__title page-hero__title--pair">
+            <span class="page-hero__title-line">Practical systems.</span>
+            <span class="page-hero__title-line">Refined presence.</span>
+          </h1>
           <p class="page-hero__lead">
             Websites, AI automation, and marketing built around how Okanagan operators actually win work, stay
             visible, and get paid.
@@ -69,13 +72,14 @@
               pieces below are the same craft, shaped to how your job actually runs.
             </p>
           </div>
-          <figure class="split__media">
+          <figure class="split__media" style="--media: url('/public/photos/svc-meeting.jpg')">
             <img
-              src="public/photos/svc-meeting.jpg"
-              alt="Team reviewing plans around a table"
+              src="/public/photos/svc-meeting.jpg"
+              alt="Handshake across a desk during a client meeting"
               width="2000"
               height="1333"
-              loading="lazy"
+              loading="eager"
+              fetchpriority="high"
               decoding="async"
             />
           </figure>
@@ -117,7 +121,7 @@
             <li>
               <figure>
                 <img
-                  src="public/photos/svc-screen.jpg"
+                  src="/public/photos/svc-screen.jpg"
                   alt="Website design work on a laptop"
                   width="2000"
                   height="1334"
@@ -129,7 +133,7 @@
             <li>
               <figure>
                 <img
-                  src="public/photos/svc-desk.jpg"
+                  src="/public/photos/svc-desk.jpg"
                   alt="Workspace with laptop and notebook"
                   width="2000"
                   height="1500"
@@ -141,7 +145,7 @@
             <li>
               <figure>
                 <img
-                  src="public/photos/svc-laptop.jpg"
+                  src="/public/photos/svc-laptop.jpg"
                   alt="Developer working at a laptop"
                   width="2000"
                   height="1335"
@@ -153,7 +157,7 @@
             <li>
               <figure>
                 <img
-                  src="public/photos/svc-plan.jpg"
+                  src="/public/photos/svc-plan.jpg"
                   alt="Team planning work together"
                   width="2000"
                   height="1125"
@@ -168,9 +172,9 @@
 
       <section class="section">
         <div class="container split reveal">
-          <figure class="split__media">
+          <figure class="split__media" style="--media: url('/public/photos/svc-phone.jpg')">
             <img
-              src="public/photos/svc-phone.jpg"
+              src="/public/photos/svc-phone.jpg"
               alt="Person managing messages on a phone"
               width="2000"
               height="1333"
@@ -244,7 +248,7 @@
             <li>
               <figure>
                 <img
-                  src="public/photos/svc-content.jpg"
+                  src="/public/photos/svc-content.jpg"
                   alt="Content planning on a desk with a tablet"
                   width="2000"
                   height="1335"
@@ -256,7 +260,7 @@
             <li>
               <figure>
                 <img
-                  src="public/photos/svc-tablet.jpg"
+                  src="/public/photos/svc-tablet.jpg"
                   alt="Analytics dashboard on a tablet"
                   width="2000"
                   height="1333"
@@ -268,7 +272,7 @@
             <li>
               <figure>
                 <img
-                  src="public/photos/svc-notes.jpg"
+                  src="/public/photos/svc-notes.jpg"
                   alt="Notebook and planning materials on a desk"
                   width="2000"
                   height="1333"
@@ -280,7 +284,7 @@
             <li>
               <figure>
                 <img
-                  src="public/photos/pro-desk.jpg"
+                  src="/public/photos/pro-desk.jpg"
                   alt="Professional desk with notebook and laptop"
                   width="2000"
                   height="1333"
@@ -308,9 +312,9 @@
               marketing that doesn’t depend on memory.
             </p>
           </div>
-          <figure class="split__media">
+          <figure class="split__media" style="--media: url('/public/photos/services-lounge.jpg')">
             <img
-              src="public/photos/services-lounge.jpg"
+              src="/public/photos/services-lounge.jpg"
               alt="Modern workspace lounge"
               width="2400"
               height="1600"
@@ -337,7 +341,7 @@
     </main>
 
     <div id="site-footer"></div>
-    <script src="js/chrome.js"></script>
-    <script src="js/main.js"></script>
+    <script src="/js/chrome.js"></script>
+    <script src="/js/main.js"></script>
   </body>
 </html>
