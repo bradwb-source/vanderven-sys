@@ -76,7 +76,7 @@
     </div>
   </div>
   <div class="container site-footer__bar">
-    <p>© ${new Date().getFullYear()} Vanderven Systems</p>
+    <p>© ${new Date().getFullYear()} Vanderven Systems · <a href="privacy.html">Privacy</a></p>
     <p>Serving the Okanagan</p>
   </div>
 </footer>`;
