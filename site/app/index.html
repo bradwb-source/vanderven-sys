@@ -1,0 +1,730 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CRM | Vanderven Systems</title>
+    <meta name="robots" content="noindex,nofollow" />
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/app/app.css" />
+  </head>
+  <body>
+    <div class="mobile-bar">
+      <div class="mobile-nav" id="mobile-nav">
+        <div class="mobile-nav__brand">
+          <img src="/public/logo-mark-nav.png" alt="" width="40" height="24" />
+          <strong>Vanderven CRM</strong>
+        </div>
+        <button
+          type="button"
+          class="mobile-nav__toggle"
+          id="mobile-nav-toggle"
+          aria-expanded="false"
+          aria-controls="mobile-nav-menu"
+          aria-label="Open menu"
+        >
+          <span class="mobile-nav__burger" aria-hidden="true"></span>
+        </button>
+        <div class="mobile-nav__menu" id="mobile-nav-menu" hidden role="navigation" aria-label="CRM sections">
+          <p class="mobile-nav__label">Overview</p>
+          <button type="button" data-view="home" class="is-active">Home</button>
+          <button type="button" data-view="schedule">Schedule</button>
+          <p class="mobile-nav__label">Work</p>
+          <button type="button" data-view="clients">Clients</button>
+          <button type="button" data-view="requests">Requests</button>
+          <button type="button" data-view="quotes">Quotes</button>
+          <button type="button" data-view="jobs">Builds</button>
+          <button type="button" data-view="invoices">Invoices</button>
+          <p class="mobile-nav__label">Sales</p>
+          <button type="button" data-view="pipeline">Pipeline</button>
+          <button type="button" data-view="vera">Vera</button>
+          <p class="mobile-nav__label">Follow-up</p>
+          <button type="button" data-view="reminders">Reminders</button>
+          <button type="button" data-view="settings">Settings</button>
+          <p class="mobile-nav__label">Break</p>
+          <button type="button" data-view="games">Games</button>
+          <div class="mobile-nav__foot">
+            <button type="button" class="btn btn-primary" id="mobile-create">+ Create</button>
+            <a class="btn btn-soft" href="/">View site</a>
+            <button type="button" class="btn btn-soft" id="mobile-sign-out">Sign out</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="app-shell">
+      <aside class="app-rail" aria-label="CRM navigation">
+        <div class="app-rail__brand">
+          <img src="/public/logo-mark-nav.png" alt="" width="40" height="24" />
+          <div>
+            <strong>Vanderven</strong>
+            <span>Work hub</span>
+          </div>
+        </div>
+
+        <nav class="app-nav">
+          <p class="app-nav__label">Overview</p>
+          <button type="button" data-view="home" class="is-active">Home</button>
+          <button type="button" data-view="schedule">Schedule</button>
+
+          <p class="app-nav__label">Work</p>
+          <button type="button" data-view="clients">Clients</button>
+          <button type="button" data-view="requests">Requests</button>
+          <button type="button" data-view="quotes">Quotes</button>
+          <button type="button" data-view="jobs">Builds</button>
+          <button type="button" data-view="invoices">Invoices</button>
+
+          <p class="app-nav__label">Sales</p>
+          <button type="button" data-view="pipeline">Pipeline</button>
+          <button type="button" data-view="vera">Vera</button>
+
+          <p class="app-nav__label">Follow-up</p>
+          <button type="button" data-view="reminders">Reminders</button>
+          <button type="button" data-view="settings">Settings</button>
+
+          <p class="app-nav__label">Break</p>
+          <button type="button" data-view="games">Games</button>
+        </nav>
+
+        <div class="app-rail__foot">
+          <a class="btn btn-ghost" href="/">View site</a>
+          <button type="button" class="btn btn-ghost" id="sign-out">Sign out</button>
+        </div>
+      </aside>
+
+      <main class="app-main">
+        <header class="app-top">
+          <div>
+            <h1 id="view-title">Home</h1>
+            <p id="view-sub">Today’s work at a glance.</p>
+          </div>
+          <div class="app-top__actions">
+            <div class="week-nav" id="week-nav" hidden>
+              <div class="schedule-mode" role="group" aria-label="Calendar mode">
+                <button type="button" class="btn btn-soft is-active" data-cal-mode="week">Week</button>
+                <button type="button" class="btn btn-soft" data-cal-mode="month">Month</button>
+              </div>
+              <button type="button" class="btn btn-soft" id="week-prev" aria-label="Previous">‹</button>
+              <button type="button" class="btn btn-soft" id="week-today">Today</button>
+              <button type="button" class="btn btn-soft" id="week-next" aria-label="Next">›</button>
+              <span class="week-label" id="week-label"></span>
+              <button type="button" class="btn btn-soft schedule-map-nav-btn" id="schedule-map-toggle" aria-pressed="true">
+                Hide map
+              </button>
+            </div>
+            <div class="filter-chips" id="filter-chips" hidden></div>
+            <div class="search-menu" id="search-menu">
+              <input
+                class="search"
+                id="search"
+                type="search"
+                placeholder="Search everything"
+                autocomplete="off"
+                aria-autocomplete="list"
+                aria-controls="search-panel"
+                aria-expanded="false"
+              />
+              <div class="search-menu__panel" id="search-panel" hidden role="listbox" aria-label="Search results"></div>
+            </div>
+            <div class="create-menu">
+              <button type="button" class="btn btn-primary" id="quick-create" aria-haspopup="menu" aria-expanded="false">
+                + Create
+              </button>
+              <div class="create-menu__panel" id="create-panel" hidden role="menu">
+                <button type="button" class="create-item tone-gold" data-create="request" role="menuitem">
+                  <span class="create-item__bar" aria-hidden="true"></span>
+                  <span class="create-item__text">
+                    <span class="create-item__name">Request</span>
+                    <span class="create-item__tag">Internal · Rob → Brad</span>
+                  </span>
+                </button>
+                <button type="button" class="create-item tone-indigo" data-create="client" role="menuitem">
+                  <span class="create-item__bar" aria-hidden="true"></span>
+                  <span class="create-item__text">
+                    <span class="create-item__name">Client</span>
+                    <span class="create-item__tag">Full client record</span>
+                  </span>
+                </button>
+                <button type="button" class="create-item tone-teal" data-create="quote" role="menuitem">
+                  <span class="create-item__bar" aria-hidden="true"></span>
+                  <span class="create-item__text">
+                    <span class="create-item__name">Quote</span>
+                    <span class="create-item__tag">Optional — from a client</span>
+                  </span>
+                </button>
+                <button type="button" class="create-item tone-rust" data-create="invoice" role="menuitem">
+                  <span class="create-item__bar" aria-hidden="true"></span>
+                  <span class="create-item__text">
+                    <span class="create-item__name">Invoice</span>
+                    <span class="create-item__tag">From a client</span>
+                  </span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <section id="view-home" aria-label="Home"></section>
+        <section id="view-pipeline" aria-label="Pipeline board" hidden></section>
+        <section id="view-schedule" aria-label="Schedule" hidden></section>
+        <section id="view-clients" aria-label="Clients" hidden></section>
+        <section id="view-requests" aria-label="Requests" hidden></section>
+        <section id="view-quotes" aria-label="Quotes" hidden></section>
+        <section id="view-jobs" aria-label="Builds" hidden></section>
+        <section id="view-invoices" aria-label="Invoices" hidden></section>
+        <section id="view-vera" aria-label="Vera chats" hidden></section>
+        <section id="view-reminders" aria-label="Reminders" hidden></section>
+        <section id="view-settings" aria-label="Settings" hidden></section>
+        <section id="view-games" aria-label="Games" hidden></section><!-- games-v1 -->
+      </main>
+    </div>
+
+    <div class="drawer-backdrop" id="drawer-backdrop" hidden></div>
+
+    <aside class="drawer drawer--wide" id="client-drawer" aria-hidden="true">
+      <div class="drawer__head">
+        <div>
+          <h2 id="client-drawer-title">Client</h2>
+          <p class="drawer-meta" id="client-drawer-meta"></p>
+        </div>
+        <div class="drawer__head-actions">
+          <button type="button" class="btn btn-soft" id="client-edit">Edit details</button>
+          <button type="button" class="btn btn-ghost" id="client-drawer-close" aria-label="Close">Close</button>
+        </div>
+      </div>
+      <div class="drawer__body client-detail" id="client-detail-body">
+        <p class="muted">Loading client…</p>
+      </div>
+    </aside>
+
+    <aside class="drawer drawer--modal" id="drawer" aria-hidden="true">
+      <div class="drawer__head">
+        <div>
+          <h2 id="drawer-title">Client</h2>
+          <p class="drawer-meta" id="drawer-meta"></p>
+        </div>
+        <button type="button" class="btn btn-ghost" id="drawer-close" aria-label="Close">Close</button>
+      </div>
+      <form class="drawer__body" id="lead-form">
+        <input type="hidden" name="id" />
+        <input type="hidden" name="internalRequest" value="" />
+        <div class="field-group" id="request-handoff-fields">
+          <p class="field-group__label">Internal handoff</p>
+          <div class="field-row">
+            <label class="field">
+              <span>From</span>
+              <select name="requestedBy">
+                <option value="Rob">Rob</option>
+                <option value="Brad">Brad</option>
+                <option value="Riley">Riley</option>
+                <option value="Morgan">Morgan</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>To</span>
+              <select name="assignee">
+                <option value="Brad">Brad</option>
+                <option value="Rob">Rob</option>
+                <option value="Riley">Riley</option>
+                <option value="Morgan">Morgan</option>
+              </select>
+            </label>
+          </div>
+          <p class="field-help">Requests are internal — Rob logs what the client wants, Brad picks it up.</p>
+        </div>
+        <div class="field-group">
+          <p class="field-group__label">Client</p>
+          <div class="field-row">
+            <label class="field">
+              <span>Name</span>
+              <input name="name" required placeholder="Jordan Lee" />
+            </label>
+            <label class="field">
+              <span>Business</span>
+              <input name="business" required placeholder="Valley Mechanical" />
+            </label>
+          </div>
+          <div class="field-row">
+            <label class="field">
+              <span>Email</span>
+              <input type="email" name="email" placeholder="you@business.ca" />
+            </label>
+            <label class="field">
+              <span>Phone</span>
+              <input name="phone" placeholder="(250) 555-0142" />
+            </label>
+          </div>
+          <div class="client-logo-fields">
+            <div class="client-logo-preview" id="lead-logo-preview" hidden>
+              <img id="lead-logo-preview-img" alt="Company logo preview" />
+            </div>
+            <div class="client-logo-fields__inputs">
+              <label class="field">
+                <span>Company logo URL</span>
+                <input name="logoUrl" id="lead-logo-url" type="text" inputmode="url" placeholder="https://…/logo.png" />
+              </label>
+              <label class="field">
+                <span>Or upload logo</span>
+                <input name="logoFile" id="lead-logo-file" type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" />
+              </label>
+              <p class="field-help">Shows on the client page and schedule. Uploads stay under ~120 KB.</p>
+            </div>
+          </div>
+        </div>
+        <div class="field-group">
+          <p class="field-group__label">Address</p>
+          <label class="field">
+            <span>Street</span>
+            <input name="addressLine" placeholder="1840 Industrial Ave" autocomplete="street-address" />
+          </label>
+          <div class="field-row field-row--3">
+            <label class="field">
+              <span>City</span>
+              <input name="city" placeholder="Kelowna" autocomplete="address-level2" />
+            </label>
+            <label class="field">
+              <span>Province</span>
+              <input name="region" placeholder="BC" autocomplete="address-level1" />
+            </label>
+            <label class="field">
+              <span>Postal</span>
+              <input name="postalCode" placeholder="V1Y 7R2" autocomplete="postal-code" />
+            </label>
+          </div>
+          <label class="field">
+            <span>Country</span>
+            <input name="country" value="Canada" placeholder="Canada" autocomplete="country-name" />
+          </label>
+          <p class="field-help">Saved addresses open in Google Maps on the client page.</p>
+        </div>
+        <div class="field-group">
+          <p class="field-group__label">Details</p>
+          <div class="field-row">
+            <label class="field">
+              <span>Industry</span>
+              <input name="industry" list="industry-list" placeholder="Real estate" />
+              <datalist id="industry-list">
+                <option value="Real estate"></option>
+                <option value="Property management"></option>
+                <option value="Professional services"></option>
+                <option value="Trades / HVAC / plumbing / electrical"></option>
+                <option value="Lawn care / landscaping / seasonal"></option>
+                <option value="Construction / renovation"></option>
+              </datalist>
+            </label>
+            <label class="field">
+              <span>Stage</span>
+              <select name="stage">
+                <option value="new">New</option>
+                <option value="audit">Audit</option>
+                <option value="quoted">Quoted</option>
+                <option value="active">Active</option>
+                <option value="won">Won</option>
+                <option value="lost">Lost</option>
+              </select>
+            </label>
+          </div>
+          <label class="field">
+            <span id="lead-notes-label">What the client wants</span>
+            <textarea
+              name="notes"
+              id="lead-notes"
+              rows="3"
+              data-rewrite="lead"
+              placeholder="Scope, goals, must-haves, timeline — what Rob heard from the client…"
+            ></textarea>
+          </label>
+        </div>
+      </form>
+      <div class="drawer__foot">
+        <button type="button" class="btn btn-danger" id="delete-lead" hidden>Delete</button>
+        <div class="drawer__foot-actions">
+          <button type="button" class="btn btn-ghost" id="cancel-lead">Cancel</button>
+          <button type="submit" class="btn btn-primary" form="lead-form" id="save-lead">Save</button>
+        </div>
+      </div>
+    </aside>
+
+    <aside class="drawer drawer--modal drawer--modal-lg" id="job-drawer" aria-hidden="true">
+      <div class="drawer__head">
+        <div>
+          <h2 id="job-drawer-title">Build</h2>
+          <p class="drawer-meta" id="job-drawer-meta"></p>
+        </div>
+        <button type="button" class="btn btn-ghost" id="job-drawer-close" aria-label="Close">Close</button>
+      </div>
+      <div class="drawer__body job-modal-body">
+        <form id="job-form">
+          <input type="hidden" name="id" />
+          <input type="hidden" name="leadId" />
+          <input type="hidden" name="quoteId" />
+          <div class="field-group">
+            <p class="field-group__label">Build</p>
+            <label class="field">
+              <span>Title</span>
+              <input name="title" required placeholder="Site audit — Valley Mechanical" />
+            </label>
+            <div class="field-row">
+              <label class="field">
+                <span>Client</span>
+                <input name="clientName" placeholder="Business name" />
+              </label>
+              <label class="field">
+                <span>Assignee</span>
+                <select name="assignee">
+                  <option value="">Unassigned</option>
+                  <option value="Brad">Brad</option>
+                  <option value="Rob">Rob</option>
+                  <option value="Riley">Riley</option>
+                  <option value="Morgan">Morgan</option>
+                </select>
+              </label>
+            </div>
+          </div>
+          <div class="field-group">
+            <p class="field-group__label">Schedule</p>
+            <div class="field-row field-row--3">
+              <label class="field">
+                <span>Date</span>
+                <input type="date" name="scheduledDate" />
+              </label>
+              <label class="field">
+                <span>Start</span>
+                <input type="time" name="startTime" value="08:00" step="900" />
+              </label>
+              <label class="field">
+                <span>Mins</span>
+                <input type="number" name="durationMin" min="15" max="480" step="15" value="90" />
+              </label>
+            </div>
+            <div class="field-row field-row--status">
+              <label class="field">
+                <span>Stage</span>
+                <select name="status">
+                  <option value="unscheduled">Backlog</option>
+                  <option value="rough_draft">Rough draft</option>
+                  <option value="architecture">Architecture</option>
+                  <option value="fine_tuning">Fine tuning</option>
+                  <option value="client_approval">Waiting on client</option>
+                  <option value="change_request">Change request</option>
+                  <option value="done">Delivered</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Color</span>
+                <select name="color">
+                  <option value="slate">Slate</option>
+                  <option value="gold">Gold</option>
+                  <option value="teal">Teal</option>
+                  <option value="rust">Rust</option>
+                  <option value="indigo">Indigo</option>
+                </select>
+              </label>
+            </div>
+            <label class="field">
+              <span>Build notes</span>
+              <textarea name="notes" rows="2" data-rewrite="build" placeholder="What needs to happen…"></textarea>
+            </label>
+            <button type="button" class="btn btn-soft" id="job-log-revisions">Log change request</button>
+          </div>
+        </form>
+        <aside class="job-context" id="job-context" hidden>
+          <p class="muted">Loading history…</p>
+        </aside>
+      </div>
+      <div class="drawer__foot">
+        <button type="button" class="btn btn-danger" id="delete-job" hidden>Delete</button>
+        <div class="drawer__foot-actions">
+          <button type="button" class="btn btn-ghost" id="cancel-job">Cancel</button>
+          <button type="submit" class="btn btn-primary" form="job-form" id="save-job">Save</button>
+        </div>
+      </div>
+    </aside>
+
+    <aside class="drawer drawer--modal" id="revision-drawer" aria-hidden="true">
+      <div class="drawer__head">
+        <div>
+          <h2>Change request</h2>
+          <p class="drawer-meta" id="revision-drawer-meta">Saves to client notes history</p>
+        </div>
+        <button type="button" class="btn btn-ghost" id="revision-drawer-close" aria-label="Close">Close</button>
+      </div>
+      <form class="drawer__body" id="revision-form">
+        <input type="hidden" name="leadId" />
+        <input type="hidden" name="jobId" />
+        <div class="field-group">
+          <p class="field-group__label">Client request</p>
+          <label class="field">
+            <span>What did they ask to change?</span>
+            <textarea name="body" rows="5" required placeholder="e.g. Swap hero image, add seasonal pricing, revise contact form…"></textarea>
+          </label>
+          <label class="field checkbox-field">
+            <input type="checkbox" name="markBuild" checked />
+            <span>Set linked build stage to Change request</span>
+          </label>
+          <label class="field checkbox-field">
+            <input type="checkbox" name="markQuote" checked />
+            <span>Mark open quote as Revisions requested</span>
+          </label>
+        </div>
+      </form>
+      <div class="drawer__foot">
+        <div class="drawer__foot-actions">
+          <button type="button" class="btn btn-ghost" id="cancel-revision">Cancel</button>
+          <button type="submit" class="btn btn-primary" form="revision-form" id="save-revision">Save to history</button>
+        </div>
+      </div>
+    </aside>
+
+    <aside class="drawer drawer--modal drawer--modal-xl" id="quote-drawer" aria-hidden="true">
+      <div class="drawer__head">
+        <div>
+          <h2 id="quote-drawer-title">Quote</h2>
+          <p class="drawer-meta" id="quote-drawer-meta"></p>
+        </div>
+        <button type="button" class="btn btn-ghost" id="quote-drawer-close" aria-label="Close">Close</button>
+      </div>
+      <div class="drawer__body invoice-modal-body">
+        <form id="quote-form">
+          <input type="hidden" name="id" />
+          <input type="hidden" name="leadId" />
+          <div class="field-group">
+            <p class="field-group__label">Client</p>
+            <label class="field">
+              <span>Link client</span>
+              <select name="leadPicker" id="quote-lead-picker">
+                <option value="">Select a client…</option>
+              </select>
+            </label>
+          </div>
+          <div class="field-group">
+            <p class="field-group__label">Quote</p>
+            <label class="field">
+              <span>Title</span>
+              <input name="title" required placeholder="Website + follow-up system" />
+            </label>
+            <div class="field-row">
+              <label class="field">
+                <span>Number</span>
+                <input name="number" placeholder="Q-1046" />
+              </label>
+              <label class="field">
+                <span>Status</span>
+                <select name="status">
+                  <option value="draft">Draft</option>
+                  <option value="sent">Sent</option>
+                  <option value="revisions_requested">Revisions requested</option>
+                  <option value="approved">Approved</option>
+                  <option value="declined">Declined</option>
+                </select>
+              </label>
+            </div>
+            <div class="field-row">
+              <label class="field">
+                <span>Client name on quote</span>
+                <input name="clientName" placeholder="Business name" />
+              </label>
+              <label class="field">
+                <span>Amount (CAD)</span>
+                <input name="amount" type="number" min="0" step="0.01" placeholder="4800" />
+              </label>
+            </div>
+            <label class="field">
+              <span>Notes / scope</span>
+              <textarea name="notes" rows="2" data-rewrite="quote" placeholder="What’s included…"></textarea>
+            </label>
+          </div>
+          <div class="field-group">
+            <p class="field-group__label">Attachments</p>
+            <p class="field-help">
+              Placeholders for privacy, terms, and forms. Toggle <strong>Every quote</strong> for defaults, or pick per quote.
+            </p>
+            <div id="quote-attachments" class="quote-attachments"></div>
+          </div>
+          <div class="field-group">
+            <p class="field-group__label">Reminders</p>
+            <label class="field">
+              <span>Owner email</span>
+              <input type="email" name="ownerEmail" placeholder="you@vanderven.ca" />
+            </label>
+            <p class="field-help">
+              <strong>Send</strong> emails the letterhead quote plus selected attachments to the client.
+              Reminders still use Settings day offsets after send.
+            </p>
+          </div>
+        </form>
+
+        <div class="invoice-preview-wrap">
+          <div class="invoice-preview-wrap__head">
+            <h3>Letterhead preview</h3>
+            <span class="muted">What the client receives</span>
+          </div>
+          <div id="quote-preview" class="invoice-doc" aria-live="polite"></div>
+        </div>
+      </div>
+      <div class="drawer__foot">
+        <button type="button" class="btn btn-danger" id="delete-quote" hidden>Delete</button>
+        <div class="drawer__foot-actions">
+          <button type="button" class="btn btn-ghost" id="cancel-quote">Cancel</button>
+          <button type="button" class="btn btn-soft" id="print-quote">Print / PDF</button>
+          <button type="button" class="btn btn-soft" id="send-quote">Send</button>
+          <button type="button" class="btn btn-soft" id="quote-schedule-build" hidden>Schedule build</button>
+          <button type="submit" class="btn btn-primary" form="quote-form" id="save-quote">Save</button>
+        </div>
+      </div>
+    </aside>
+
+    <aside class="drawer drawer--modal drawer--modal-xl" id="invoice-drawer" aria-hidden="true">
+      <div class="drawer__head">
+        <div>
+          <h2 id="invoice-drawer-title">Invoice</h2>
+          <p class="drawer-meta" id="invoice-drawer-meta"></p>
+        </div>
+        <button type="button" class="btn btn-ghost" id="invoice-drawer-close" aria-label="Close">Close</button>
+      </div>
+      <div class="drawer__body invoice-modal-body">
+        <form id="invoice-form">
+          <input type="hidden" name="id" />
+          <input type="hidden" name="leadId" />
+          <input type="hidden" name="jobId" />
+          <input type="hidden" name="quoteId" />
+
+          <div class="field-group">
+            <p class="field-group__label">Autofill</p>
+            <div class="field-row">
+              <label class="field">
+                <span>Client</span>
+                <select name="leadPicker" id="invoice-lead-picker">
+                  <option value="">Select a client…</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>From quote</span>
+                <select name="quotePicker" id="invoice-quote-picker">
+                  <option value="">Optional</option>
+                </select>
+              </label>
+            </div>
+            <label class="field">
+              <span>From build</span>
+              <select name="jobPicker" id="invoice-job-picker">
+                <option value="">Optional</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="field-group">
+            <p class="field-group__label">Invoice</p>
+            <label class="field">
+              <span>Title / project</span>
+              <input name="title" required placeholder="Site audit — Valley Mechanical" />
+            </label>
+            <div class="field-row">
+              <label class="field">
+                <span>Number</span>
+                <input name="number" placeholder="Auto INV-####" />
+              </label>
+              <label class="field">
+                <span>Status</span>
+                <select name="status">
+                  <option value="draft">Draft</option>
+                  <option value="sent">Sent</option>
+                  <option value="paid">Paid</option>
+                  <option value="overdue">Overdue</option>
+                </select>
+              </label>
+            </div>
+            <div class="field-row">
+              <label class="field">
+                <span>Issue date</span>
+                <input type="date" name="issueDate" />
+              </label>
+              <label class="field">
+                <span>Due date</span>
+                <input type="date" name="dueDate" />
+              </label>
+            </div>
+            <div class="field-row">
+              <label class="field">
+                <span>Payment terms</span>
+                <input name="paymentTerms" placeholder="Net 15" />
+              </label>
+              <label class="field">
+                <span>Tax %</span>
+                <input name="taxRate" type="number" min="0" max="30" step="0.01" value="5" />
+              </label>
+            </div>
+          </div>
+
+          <div class="field-group">
+            <p class="field-group__label">Bill to</p>
+            <label class="field">
+              <span>Business / name on invoice</span>
+              <input name="clientName" placeholder="Business name" />
+            </label>
+            <label class="field">
+              <span>Contact name</span>
+              <input name="billToName" placeholder="Primary contact" />
+            </label>
+            <div class="field-row">
+              <label class="field">
+                <span>Email</span>
+                <input type="email" name="billToEmail" placeholder="billing@client.com" />
+              </label>
+              <label class="field">
+                <span>Phone</span>
+                <input name="billToPhone" placeholder="(250) 555-0100" />
+              </label>
+            </div>
+            <label class="field">
+              <span>Address</span>
+              <textarea name="billToAddress" rows="2" placeholder="Street, city, province, postal"></textarea>
+            </label>
+          </div>
+
+          <div class="field-group">
+            <div class="field-group__head">
+              <p class="field-group__label">Line items</p>
+              <button type="button" class="btn btn-soft" id="invoice-add-line">Add line</button>
+            </div>
+            <div id="invoice-lines" class="invoice-lines"></div>
+          </div>
+
+          <div class="field-group">
+            <p class="field-group__label">Notes</p>
+            <label class="field">
+              <span>Shown on invoice</span>
+              <textarea name="notes" rows="2" data-rewrite="invoice" placeholder="E-transfer to hello@vanderven.ca…"></textarea>
+            </label>
+          </div>
+        </form>
+
+        <div class="invoice-preview-wrap">
+          <div class="invoice-preview-wrap__head">
+            <h3>Letterhead preview</h3>
+            <span class="muted">What the client receives</span>
+          </div>
+          <div id="invoice-preview" class="invoice-doc" aria-live="polite"></div>
+        </div>
+      </div>
+      <div class="drawer__foot">
+        <button type="button" class="btn btn-danger" id="delete-invoice" hidden>Delete</button>
+        <div class="drawer__foot-actions">
+          <button type="button" class="btn btn-ghost" id="cancel-invoice">Cancel</button>
+          <button type="button" class="btn btn-soft" id="print-invoice">Print / PDF</button>
+          <button type="button" class="btn btn-soft" id="send-invoice">Send</button>
+          <button type="submit" class="btn btn-primary" form="invoice-form" id="save-invoice">Save</button>
+        </div>
+      </div>
+    </aside>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="/app/app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sign in | Vanderven Systems</title>
+    <meta name="robots" content="noindex,nofollow" />
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="icon" href="/public/favicon.ico" sizes="any" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Outfit:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/app/app.css" />
+  </head>
+  <body class="login-page">
+    <div class="login-stage" aria-hidden="true">
+      <img
+        class="login-stage__img"
+        src="/public/photos/office.jpg"
+        alt=""
+        width="1920"
+        height="1080"
+        fetchpriority="high"
+      />
+      <div class="login-stage__veil"></div>
+      <div class="login-stage__glow"></div>
+    </div>
+
+    <main class="login-shell">
+      <header class="login-hero">
+        <img class="login-mark" src="/public/logo-mark-nav.png" alt="" width="56" height="34" />
+        <p class="login-brand">Vanderven</p>
+        <h1 class="login-title">Systems</h1>
+        <p class="login-lead">Private workspace for leads, builds, and the week ahead.</p>
+      </header>
+
+      <form id="login-form" class="login-form" novalidate>
+        <label>
+          <span>Email</span>
+          <input
+            type="email"
+            name="email"
+            autocomplete="username"
+            required
+            autofocus
+            placeholder="you@vanderven.ca"
+          />
+        </label>
+        <label>
+          <span>Password</span>
+          <input
+            type="password"
+            name="password"
+            autocomplete="current-password"
+            required
+            placeholder="Enter password"
+          />
+        </label>
+        <p id="login-error" class="form-error" hidden></p>
+        <button type="submit" class="btn btn-primary login-submit">Continue</button>
+      </form>
+
+      <p class="login-foot"><a href="/">Back to site</a></p>
+    </main>
+
+    <script>
+      (() => {
+        const form = document.getElementById("login-form");
+        const errorEl = document.getElementById("login-error");
+        const params = new URLSearchParams(location.search);
+        const next = params.get("next") || "/app/";
+        if (params.get("reason") === "idle") {
+          errorEl.textContent = "Signed out after 30 minutes of inactivity. Sign in again.";
+          errorEl.hidden = false;
+        }
+
+        form.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          errorEl.hidden = true;
+          const dataForm = new FormData(form);
+          const email = dataForm.get("email");
+          const password = dataForm.get("password");
+          const btn = form.querySelector("button");
+          btn.disabled = true;
+          btn.textContent = "Signing in…";
+          try {
+            const res = await fetch("/api/login", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              credentials: "same-origin",
+              body: JSON.stringify({ email, password }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+              errorEl.textContent = data.error || "Could not sign in.";
+              errorEl.hidden = false;
+              btn.disabled = false;
+              btn.textContent = "Continue";
+              return;
+            }
+            location.href = next.startsWith("/") ? next : "/app/";
+          } catch {
+            errorEl.textContent = "Network error. Try again.";
+            errorEl.hidden = false;
+            btn.disabled = false;
+            btn.textContent = "Continue";
+          }
+        });
+      })();
+    </script>
+  </body>
+</html>
