@@ -2,20 +2,80 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Vanderven logo</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Vanderven Systems logo</title>
   <style>
-    html, body { margin: 0; min-height: 100%; background: #000; color: #b8953e; font-family: system-ui, sans-serif; }
-    main { min-height: 100vh; display: grid; place-items: center; padding: 24px; box-sizing: border-box; }
-    img { width: min(92vw, 720px); height: auto; display: block; }
-    p { margin: 16px 0 0; font-size: 14px; opacity: 0.7; text-align: center; }
+    :root {
+      color-scheme: dark;
+      --gold: #b8953e;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      background: #000;
+      color: var(--gold);
+      font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    }
+    main {
+      min-height: 100dvh;
+      display: grid;
+      place-items: center;
+      padding: max(24px, env(safe-area-inset-top)) 24px max(32px, env(safe-area-inset-bottom));
+    }
+    figure {
+      margin: 0;
+      width: min(100%, 320px);
+      text-align: center;
+    }
+    figure.wide {
+      width: min(100%, 360px);
+      margin-top: 48px;
+    }
+    img {
+      width: 100%;
+      height: auto;
+      display: block;
+      image-rendering: auto;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    figcaption {
+      margin-top: 14px;
+      font-size: 13px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      opacity: 0.65;
+      font-family: system-ui, -apple-system, sans-serif;
+    }
   </style>
 </head>
 <body>
   <main>
     <div>
-      <img src="/public/logo-mark-nav.png" alt="Vanderven Systems logo" />
-      <p>Gold mark on black (site appearance)</p>
+      <figure>
+        <!-- Display ~320 CSS px; 2x asset for Retina iPads -->
+        <img
+          src="logo-mark-preview.png"
+          srcset="logo-mark-preview.png 640w, logo-mark-preview-2x.png 960w"
+          sizes="320px"
+          width="640"
+          height="380"
+          alt="Vanderven Systems mark"
+          decoding="async"
+        />
+        <figcaption>Brand mark</figcaption>
+      </figure>
+      <figure class="wide">
+        <img
+          src="logo-lockup-preview.png"
+          width="720"
+          height="432"
+          alt="Vanderven Systems lockup"
+          decoding="async"
+        />
+        <figcaption>Full lockup</figcaption>
+      </figure>
     </div>
   </main>
 </body>
