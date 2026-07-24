@@ -3,70 +3,77 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Vanderven Systems logo</title>
+  <title>Vanderven Systems — HD logo</title>
   <style>
-    :root { color-scheme: dark; --gold: #b8953e; }
+    :root { color-scheme: dark; }
     * { box-sizing: border-box; }
     html, body {
       margin: 0;
       min-height: 100%;
       background: #000;
-      color: var(--gold);
+      color: #b8953e;
+      font-family: system-ui, -apple-system, sans-serif;
     }
     main {
       min-height: 100dvh;
       display: grid;
       place-items: center;
-      padding: max(24px, env(safe-area-inset-top)) 24px max(32px, env(safe-area-inset-bottom));
+      padding: max(28px, env(safe-area-inset-top)) 24px max(36px, env(safe-area-inset-bottom));
     }
     figure {
       margin: 0;
-      width: min(100%, 320px);
+      width: min(100%, 420px);
       text-align: center;
     }
-    figure.wide {
-      width: min(100%, 360px);
-      margin-top: 48px;
-    }
-    img {
+    /* SVG scales crisply on retina — do not upscale beyond this CSS size */
+    object, img {
       width: 100%;
       height: auto;
       display: block;
-      image-rendering: auto;
     }
     figcaption {
-      margin-top: 14px;
-      font-size: 13px;
-      letter-spacing: 0.08em;
+      margin-top: 16px;
+      font-size: 12px;
+      letter-spacing: 0.12em;
       text-transform: uppercase;
-      opacity: 0.65;
-      font-family: system-ui, -apple-system, sans-serif;
+      opacity: 0.55;
     }
+    .links {
+      margin-top: 28px;
+      font-size: 13px;
+      line-height: 1.6;
+      opacity: 0.75;
+    }
+    a { color: #d8b65c; }
   </style>
 </head>
 <body>
   <main>
     <div>
       <figure>
-        <img
-          src="https://raw.githubusercontent.com/bradwb-source/vanderven-sys/cursor/crm-test-portion-fef7/public/logo-mark-preview-2x.png"
-          width="960"
-          height="571"
-          alt="Vanderven Systems mark"
-          decoding="async"
-        />
-        <figcaption>Brand mark</figcaption>
+        <!-- Vector SVG = true HD on iPad -->
+        <object
+          type="image/svg+xml"
+          data="https://raw.githubusercontent.com/bradwb-source/vanderven-sys/cursor/crm-test-portion-fef7/public/logo-mark-hd-color.svg"
+          width="420"
+          height="250"
+          aria-label="Vanderven Systems logo"
+        >
+          <img
+            src="https://raw.githubusercontent.com/bradwb-source/vanderven-sys/cursor/crm-test-portion-fef7/public/logo-mark-4k-color.png"
+            width="840"
+            height="500"
+            alt="Vanderven Systems logo"
+          />
+        </object>
+        <figcaption>HD vector mark</figcaption>
       </figure>
-      <figure class="wide">
-        <img
-          src="https://raw.githubusercontent.com/bradwb-source/vanderven-sys/cursor/crm-test-portion-fef7/public/logo-lockup-preview.png"
-          width="720"
-          height="432"
-          alt="Vanderven Systems lockup"
-          decoding="async"
-        />
-        <figcaption>Full lockup</figcaption>
-      </figure>
+      <p class="links">
+        Direct SVG:
+        <a href="https://raw.githubusercontent.com/bradwb-source/vanderven-sys/cursor/crm-test-portion-fef7/public/logo-mark-hd-color.svg">logo-mark-hd-color.svg</a><br />
+        4K PNG:
+        <a href="https://raw.githubusercontent.com/bradwb-source/vanderven-sys/cursor/crm-test-portion-fef7/public/logo-mark-4k-color.png">logo-mark-4k-color.png</a>
+      </p>
     </div>
   </main>
 </body>
