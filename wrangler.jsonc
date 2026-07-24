@@ -7,7 +7,7 @@
     "enabled": true
   },
   "assets": {
-    "directory": ".",
+    "directory": "site",
     "binding": "ASSETS",
     "not_found_handling": "404-page",
     "run_worker_first": [
@@ -22,8 +22,16 @@
     {
       "binding": "DB",
       "database_name": "vanderven-crm",
-      "database_id": "00000000-0000-4000-8000-000000000001",
+      "database_id": "640615aa-4bf3-4db3-a56c-d6653370cc64",
       "migrations_dir": "migrations"
     }
-  ]
+  ],
+  "ai": {
+    "binding": "AI",
+    "remote": true
+  },
+  "triggers": {
+    // Daily quote reminder sweep (UTC).
+    "crons": ["0 15 * * *"]
+  }
 }

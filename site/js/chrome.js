@@ -77,9 +77,76 @@
   </div>
   <div class="container site-footer__bar">
     <p>© ${new Date().getFullYear()} Vanderven Systems · <a href="privacy.html">Privacy</a></p>
-    <p>Serving the Okanagan</p>
+    <p class="site-footer__bar-end">
+      <span>Serving the Okanagan</span>
+      <span class="site-footer__sep" aria-hidden="true">|</span>
+      <a class="site-footer__team" href="/login" title="Team sign in">Team</a>
+    </p>
   </div>
 </footer>`;
+  }
+
+  // Vera chat on marketing pages only (chrome.js is not used by /login or /app).
+  if (!document.querySelector("[data-vera-chat]")) {
+    const wrap = document.createElement("div");
+    wrap.innerHTML = `
+    <div class="vera-chat" data-vera-chat hidden>
+      <button
+        type="button"
+        class="vera-chat__launcher"
+        data-vera-open
+        aria-expanded="false"
+        aria-controls="vera-chat-panel"
+        aria-label="Chat with Vera"
+      >
+        <img class="vera-chat__avatar" src="/public/vera.jpg" alt="" width="112" height="112" />
+      </button>
+      <section
+        id="vera-chat-panel"
+        class="vera-chat__panel"
+        data-vera-panel
+        hidden
+        role="dialog"
+        aria-modal="false"
+        aria-labelledby="vera-chat-title"
+      >
+        <header class="vera-chat__head">
+          <img class="vera-chat__avatar vera-chat__avatar--sm" src="/public/vera.jpg" alt="" width="72" height="72" />
+          <div class="vera-chat__intro">
+            <h2 id="vera-chat-title" class="vera-chat__title">Vera</h2>
+          </div>
+          <button type="button" class="vera-chat__close" data-vera-close aria-label="Close chat">
+            <span aria-hidden="true">×</span>
+          </button>
+        </header>
+        <div class="vera-chat__messages" data-vera-messages aria-live="polite"></div>
+        <p class="vera-chat__error" data-vera-error hidden></p>
+        <form class="vera-chat__form" data-vera-form>
+          <label class="sr-only" for="vera-chat-input">Message Vera</label>
+          <textarea
+            id="vera-chat-input"
+            name="message"
+            data-vera-input
+            rows="1"
+            maxlength="800"
+            placeholder="Ask Vera…"
+            required
+          ></textarea>
+          <button type="submit" class="vera-chat__send" data-vera-send aria-label="Send">
+            <span aria-hidden="true">→</span>
+          </button>
+        </form>
+        <a class="vera-chat__cta" href="contact.html">Prefer a form? Contact us</a>
+      </section>
+    </div>`;
+    document.body.appendChild(wrap.firstElementChild);
+  }
+
+  if (!document.querySelector('script[src="/js/chat.js"]')) {
+    const chatScript = document.createElement("script");
+    chatScript.src = "/js/chat.js";
+    chatScript.defer = true;
+    document.body.appendChild(chatScript);
   }
 
   const siteHeader = document.querySelector(".site-header");

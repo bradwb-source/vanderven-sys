@@ -32,7 +32,7 @@
         alert(err.message || "Something went wrong. Please email hello@vandervensystems.com.");
         if (submit) {
           submit.disabled = false;
-          submit.textContent = original || "Request audit";
+          submit.textContent = original || "Start a conversation";
         }
       }
     });

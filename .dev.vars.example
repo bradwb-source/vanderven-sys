@@ -1,3 +1,11 @@
 # Local CRM secrets for `wrangler dev` (copy to .dev.vars)
 CRM_PASSWORD=vanderven-demo
 SESSION_SECRET=change-me-to-a-long-random-string
+CRM_OWNER_EMAIL=brad@vanderven.systems
+# Optional: real email delivery for quote reminders
+# RESEND_API_KEY=re_xxx
+# REMINDER_FROM_EMAIL=CRM Reminders <reminders@yourdomain.com>
+#
+# Note rewrite uses Cloudflare Workers AI (wrangler.jsonc ai binding).
+# Run `npx wrangler login` once, or set CLOUDFLARE_API_TOKEN, so `npm run dev`
+# can reach the remote AI binding.
