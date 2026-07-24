@@ -44,7 +44,8 @@ const CHAT_MAX_TOKENS = 220;
 const CHAT_RATE_LIMIT = 20;
 const CHAT_RATE_WINDOW_MS = 10 * 60 * 1000;
 const SESSION_COOKIE = "vs_session";
-const SESSION_TTL_SEC = 60 * 60 * 24 * 14; // 14 days
+const SESSION_TTL_SEC = 60 * 60 * 24 * 14; // absolute max cookie life
+const SESSION_IDLE_TTL_SEC = 30 * 60; // log out after 30 min inactivity
 
 const encoder = new TextEncoder();
 /** @type {Map<string, number[]>} */
@@ -187,7 +188,7 @@ async function ensureUsers(env) {
     return;
   }
   if (!hasUsers) {
-    const email = cleanText(env.CRM_OWNER_EMAIL || "brad@vanderven.systems", 160).toLowerCase();
+    const email = cleanText(env.CRM_OWNER_EMAIL || "brad@vanderven.ca", 160).toLowerCase();
     const password = String(env.CRM_PASSWORD || "vanderven-demo");
     const { hash, salt } = await hashPassword(password);
     const ts = nowIso();
@@ -232,7 +233,7 @@ async function ensureUsers(env) {
 
 async function ensureAccountOwners(env) {
   if (!env.DB) return;
-  const email = cleanText(env.CRM_OWNER_EMAIL || "brad@vanderven.systems", 160).toLowerCase();
+  const email = cleanText(env.CRM_OWNER_EMAIL || "brad@vanderven.ca", 160).toLowerCase();
   const ts = nowIso();
   try {
     await env.DB.prepare(
@@ -451,13 +452,15 @@ async function changeOwnPassword(env, sessionUser, body = {}) {
 
 async function createSessionToken(env, user) {
   const secret = env.SESSION_SECRET || env.CRM_PASSWORD || "dev-secret";
-  const exp = Math.floor(Date.now() / 1000) + SESSION_TTL_SEC;
+  const now = Math.floor(Date.now() / 1000);
+  const exp = now + SESSION_TTL_SEC;
   const payload = b64urlFromString(
     JSON.stringify({
       sub: user?.id || null,
       email: user?.email || null,
       role: user?.role || "member",
       exp,
+      last: now,
     })
   );
   const sig = await hmacSign(secret, payload);
@@ -477,7 +480,10 @@ async function readSession(env, token) {
   try {
     const jsonStr = new TextDecoder().decode(fromB64url(payload));
     const data = JSON.parse(jsonStr);
-    if (!data.exp || data.exp < Math.floor(Date.now() / 1000)) return null;
+    const now = Math.floor(Date.now() / 1000);
+    if (!data.exp || data.exp < now) return null;
+    // Missing last = legacy token; force re-login so idle rules apply cleanly.
+    if (!data.last || now - Number(data.last) > SESSION_IDLE_TTL_SEC) return null;
     return data;
   } catch {
     return null;
@@ -513,9 +519,27 @@ async function getSessionUser(request, env) {
   };
 }
 
+async function touchSessionCookie(request, env, user) {
+  if (!user) return "";
+  const token = await createSessionToken(env, user);
+  return sessionCookie(token, request.url);
+}
+
+function withSessionCookie(response, cookie) {
+  if (!response || !cookie) return response;
+  const headers = new Headers(response.headers);
+  headers.append("Set-Cookie", cookie);
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
 function sessionCookie(token, requestUrl) {
   const secure = new URL(requestUrl).protocol === "https:" ? "; Secure" : "";
-  return `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_TTL_SEC}${secure}`;
+  // Cookie max-age matches idle window so browsers drop stale sessions too.
+  return `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_IDLE_TTL_SEC}${secure}`;
 }
 
 function clearSessionCookie(requestUrl) {
@@ -2902,7 +2926,7 @@ async function backfillQuoteSentAt(env) {
 
 async function defaultReminderSettings(env) {
   return {
-    ownerEmail: cleanText(env.CRM_OWNER_EMAIL || "brad@vanderven.systems", 160),
+    ownerEmail: cleanText(env.CRM_OWNER_EMAIL || "brad@vanderven.ca", 160),
     ownerEnabled: true,
     ownerDays: [2, 5, 10],
     clientEnabled: true,
@@ -2934,7 +2958,7 @@ async function ensureReminderSettings(env, user = null) {
     .first();
   if (!row) {
     const ts = nowIso();
-    const ownerEmail = cleanText(env.CRM_OWNER_EMAIL || "brad@vanderven.systems", 160);
+    const ownerEmail = cleanText(env.CRM_OWNER_EMAIL || "brad@vanderven.ca", 160);
     await env.DB.prepare(
       `INSERT INTO reminder_settings
         (id, owner_email, owner_enabled, owner_days, client_enabled, client_days, stop_on_closed, updated_at)
@@ -3094,14 +3118,40 @@ function toBase64Utf8(text) {
   return btoa(binary);
 }
 
+async function notifyOwnerNewLead(env, lead, { source = "contact" } = {}) {
+  if (!lead?.id) return { channel: "log", status: "skipped", error: "Missing lead." };
+  const toEmail = cleanText(env.CRM_OWNER_EMAIL || COMPANY.email || "brad@vanderven.ca", 160).toLowerCase();
+  const lines = [
+    `New website ${source} lead`,
+    ``,
+    `Name: ${lead.name || "—"}`,
+    `Business: ${lead.business || "—"}`,
+    `Email: ${lead.email || "—"}`,
+    `Phone: ${lead.phone || "—"}`,
+    `Industry: ${lead.industry || "—"}`,
+    lead.notes ? `\nMessage:\n${lead.notes}` : "",
+    ``,
+    `Open in CRM: /app/#clients?id=${lead.id}`,
+  ].filter((line) => line !== undefined);
+
+  return deliverReminder(env, {
+    toEmail,
+    subject: `New lead: ${lead.business || lead.name || "Website inquiry"}`,
+    body: lines.join("\n"),
+  });
+}
+
 async function deliverReminder(env, { toEmail, subject, body, html, attachments }) {
   if (!toEmail) {
     return { channel: "log", status: "skipped", error: "Missing recipient email." };
   }
   const apiKey = env.RESEND_API_KEY;
-  const from = env.REMINDER_FROM_EMAIL || "CRM Reminders <onboarding@resend.dev>";
+  const from =
+    env.REMINDER_FROM_EMAIL ||
+    env.NOTIFY_FROM_EMAIL ||
+    "Vanderven Systems <brad@vanderven.ca>";
   if (!apiKey) {
-    // Demo mode: persist to reminder inbox; wire RESEND_API_KEY to send for real.
+    // No outbound mail until RESEND_API_KEY is set (lead still saved in CRM).
     return {
       channel: "log",
       status: "logged",
@@ -3128,6 +3178,7 @@ async function deliverReminder(env, { toEmail, subject, body, html, attachments 
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
+        "User-Agent": "vanderven-sys/1.0",
       },
       body: JSON.stringify(payload),
     });
@@ -3239,9 +3290,9 @@ async function processQuoteReminders(env) {
 
 const COMPANY = {
   name: "Vanderven Systems",
-  email: "hello@vandervensystems.com",
+  email: "hello@vanderven.ca",
   location: "Kelowna & Central Okanagan, BC",
-  web: "vanderven.systems",
+  web: "vanderven.ca",
   tagline: "Websites, automation & systems for local businesses",
 };
 
@@ -3539,7 +3590,7 @@ async function ensureQuotesInvoicesSeeded(env) {
       d.setUTCDate(d.getUTCDate() - daysAgo);
       return d.toISOString();
     };
-    const owner = cleanText(env.CRM_OWNER_EMAIL || "brad@vanderven.systems", 160);
+    const owner = cleanText(env.CRM_OWNER_EMAIL || "brad@vanderven.ca", 160);
     const quotes = [
       ["quote_demo_01", "lead_demo_01", "Q-1042", "Website + follow-up system", "Valley Mechanical Ltd.", "sent", 480000, "Includes intake form and quote chase sequence.", sentAt(5), owner],
       ["quote_demo_02", "lead_demo_02", "Q-1043", "Listing inquiry overhaul", "Okanagan Homes Realty", "approved", 360000, "Weekend response SLA + cleaner property pages.", sentAt(12), owner],
@@ -4106,6 +4157,11 @@ async function handleApi(request, env) {
     }
     const result = await createLead(env, body, { source: "contact", stage: "new" });
     if (result.error) return badRequest(result.error);
+    try {
+      await notifyOwnerNewLead(env, result.lead, { source: "contact" });
+    } catch {
+      /* lead is saved even if notify fails */
+    }
     return json({ ok: true, id: result.lead.id }, { status: 201 });
   }
 
@@ -4188,12 +4244,34 @@ async function handleApi(request, env) {
 
   if (path === "/api/session" && method === "GET") {
     const user = await getSessionUser(request, env);
-    return json({ authenticated: !!user, user });
+    if (!user) {
+      return json(
+        { authenticated: false, user: null },
+        { headers: { "Set-Cookie": clearSessionCookie(request.url) } }
+      );
+    }
+    const refresh = await touchSessionCookie(request, env, user);
+    return withSessionCookie(
+      json({ authenticated: true, user, idleTimeoutSec: SESSION_IDLE_TTL_SEC }),
+      refresh
+    );
   }
 
   const sessionUser = await getSessionUser(request, env);
-  if (!sessionUser) return json({ error: "Unauthorized." }, { status: 401 });
+  if (!sessionUser) {
+    return json(
+      { error: "Unauthorized." },
+      { status: 401, headers: { "Set-Cookie": clearSessionCookie(request.url) } }
+    );
+  }
+  const sessionRefreshCookie = await touchSessionCookie(request, env, sessionUser);
+  return withSessionCookie(
+    await handleAuthedApi(request, env, sessionUser, url, path, method),
+    sessionRefreshCookie
+  );
+}
 
+async function handleAuthedApi(request, env, sessionUser, url, path, method) {
   if (path === "/api/account/password" && method === "POST") {
     let body;
     try {
@@ -4665,7 +4743,11 @@ export default {
 
       if (pathname === "/app" || pathname === "/app/" || pathname.startsWith("/app/")) {
         // Static CRM assets must stay public so login can load CSS/JS.
-        if (/\.(css|js|map|png|jpe?g|svg|ico|webp|woff2?)$/i.test(pathname)) {
+        // Game player HTML under /app/games/ is also public (iframe host).
+        if (
+          /\.(css|js|map|png|jpe?g|svg|ico|webp|woff2?)$/i.test(pathname) ||
+          (pathname.startsWith("/app/games/") && /\.html$/i.test(pathname))
+        ) {
           return env.ASSETS.fetch(request);
         }
         if (!authed) return redirect(`/login?next=${encodeURIComponent("/app/")}`);

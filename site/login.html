@@ -46,7 +46,7 @@
             autocomplete="username"
             required
             autofocus
-            placeholder="you@vanderven.systems"
+            placeholder="you@vanderven.ca"
           />
         </label>
         <label>
@@ -72,6 +72,10 @@
         const errorEl = document.getElementById("login-error");
         const params = new URLSearchParams(location.search);
         const next = params.get("next") || "/app/";
+        if (params.get("reason") === "idle") {
+          errorEl.textContent = "Signed out after 30 minutes of inactivity. Sign in again.";
+          errorEl.hidden = false;
+        }
 
         form.addEventListener("submit", async (event) => {
           event.preventDefault();

@@ -67,6 +67,7 @@
     },
     reminders: { title: "Reminders", sub: "Automated quote follow-ups for you and the client." },
     settings: { title: "Settings", sub: "Password, users, quote attachments, and reminders." },
+    games: { title: "Games", sub: "Four quick titles when you need a break." },
   };
 
   const LIST_VIEWS = new Set(["clients", "requests", "quotes", "jobs", "invoices"]);
@@ -107,6 +108,8 @@
     clientsSort: { key: "updated", dir: "desc" },
     veraChats: [],
     veraDetail: null,
+    gamesActiveId: null,
+    gamesHandle: null,
   };
 
   const SLOT_START_HOUR = 8;
@@ -126,6 +129,7 @@
     vera: document.getElementById("view-vera"),
     reminders: document.getElementById("view-reminders"),
     settings: document.getElementById("view-settings"),
+    games: document.getElementById("view-games"),
     search: document.getElementById("search"),
     searchMenu: document.getElementById("search-menu"),
     searchPanel: document.getElementById("search-panel"),
@@ -205,9 +209,9 @@
 
   const COMPANY = {
     name: "Vanderven Systems",
-    email: "hello@vandervensystems.com",
+    email: "hello@vanderven.ca",
     location: "Kelowna & Central Okanagan, BC",
-    web: "vanderven.systems",
+    web: "vanderven.ca",
     tagline: "Websites, automation & systems for local businesses",
     logo: "/public/logo-mark-nav.png",
   };
@@ -224,6 +228,7 @@
     vera: els.vera,
     reminders: els.reminders,
     settings: els.settings,
+    games: els.games,
   };
 
   function startOfWeek(date) {
@@ -377,6 +382,64 @@
     toastTimer = setTimeout(() => els.toast.classList.remove("is-in"), 2200);
   };
 
+  const IDLE_TIMEOUT_MS = 30 * 60 * 1000;
+  const IDLE_TOUCH_MS = 5 * 60 * 1000;
+  let lastActivityAt = Date.now();
+  let idleCheckTimer = 0;
+  let idleTouchTimer = 0;
+  let idleSigningOut = false;
+
+  function markActivity() {
+    lastActivityAt = Date.now();
+  }
+
+  async function forceIdleSignOut() {
+    if (idleSigningOut) return;
+    idleSigningOut = true;
+    try {
+      await fetch("/api/logout", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      });
+    } catch {
+      /* still send them to login */
+    }
+    location.href = "/login?next=/app/&reason=idle";
+  }
+
+  function scheduleIdleWatch() {
+    clearTimeout(idleCheckTimer);
+    const remaining = IDLE_TIMEOUT_MS - (Date.now() - lastActivityAt);
+    idleCheckTimer = window.setTimeout(() => {
+      if (Date.now() - lastActivityAt >= IDLE_TIMEOUT_MS) {
+        forceIdleSignOut();
+        return;
+      }
+      scheduleIdleWatch();
+    }, Math.max(1000, remaining + 25));
+  }
+
+  function startIdleWatch() {
+    const bump = () => {
+      markActivity();
+      scheduleIdleWatch();
+    };
+    ["pointerdown", "keydown", "scroll", "touchstart", "mousemove", "wheel"].forEach((eventName) => {
+      window.addEventListener(eventName, bump, { passive: true, capture: true });
+    });
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) bump();
+    });
+    scheduleIdleWatch();
+    clearInterval(idleTouchTimer);
+    idleTouchTimer = window.setInterval(() => {
+      if (Date.now() - lastActivityAt > IDLE_TOUCH_MS) return;
+      api("/api/session").catch(() => {});
+    }, IDLE_TOUCH_MS);
+  }
+
   async function api(path, options = {}) {
     const res = await fetch(path, {
       credentials: "same-origin",
@@ -384,9 +447,11 @@
       ...options,
     });
     if (res.status === 401) {
-      location.href = "/login?next=/app";
+      location.href = "/login?next=/app/&reason=idle";
       throw new Error("Unauthorized");
     }
+    markActivity();
+    scheduleIdleWatch();
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || "Request failed");
     return data;
@@ -1136,15 +1201,22 @@
       const local = email.split("@")[0];
       return local.charAt(0).toUpperCase() + local.slice(1);
     }
-    return "there";
+    return "";
   }
 
   function applyViewHeader(view = state.view) {
     const copy = VIEW_COPY[view];
     if (!copy || !els.title || !els.sub) return;
     if (view === "home") {
-      els.title.textContent = `${timeOfDayGreeting()}, ${sessionFirstName()}.`;
-      els.title.classList.add("app-top__greeting");
+      const name = sessionFirstName();
+      if (name) {
+        els.title.textContent = `${timeOfDayGreeting()}, ${name}.`;
+        els.title.classList.add("app-top__greeting");
+      } else {
+        // Keep static Home title until session loads — avoids "there" → name flash.
+        els.title.textContent = copy.title;
+        els.title.classList.remove("app-top__greeting");
+      }
     } else {
       els.title.textContent = copy.title;
       els.title.classList.remove("app-top__greeting");
@@ -1152,8 +1224,23 @@
     els.sub.textContent = copy.sub;
   }
 
+  async function stopActiveGame() {
+    if (state.gamesHandle && typeof state.gamesHandle.destroy === "function") {
+      try {
+        await state.gamesHandle.destroy();
+      } catch {
+        /* ignore teardown errors */
+      }
+    }
+    state.gamesHandle = null;
+  }
+
   function setView(view) {
     if (!VIEW_COPY[view]) return;
+    if (state.view === "games" && view !== "games") {
+      stopActiveGame();
+      state.gamesActiveId = null;
+    }
     state.view = view;
     if (view !== "vera") state.veraDetail = null;
     if (!LIST_VIEWS.has(view) || view === "clients" || view === "requests") {
@@ -1178,7 +1265,8 @@
 
     applyViewHeader(view);
     els.search.placeholder = view === "vera" ? "Search Vera chats" : "Search everything";
-    els.search.hidden = false;
+    els.search.hidden = view === "games";
+    if (els.searchMenu) els.searchMenu.hidden = view === "games";
 
     renderFilters();
     render();
@@ -2900,7 +2988,7 @@
             <div class="field-row">
               <label class="field">
                 <span>Email</span>
-                <input type="email" name="email" required placeholder="teammate@vanderven.systems" autocomplete="off" />
+                <input type="email" name="email" required placeholder="teammate@vanderven.ca" autocomplete="off" />
               </label>
               <label class="field">
                 <span>Name</span>
@@ -3260,8 +3348,130 @@
       vera: renderVera,
       reminders: renderReminders,
       settings: renderSettings,
+      games: renderGames,
     };
     (map[state.view] || renderHome)();
+  }
+
+  const GAMES_CATALOG = [
+    {
+      id: "asteroids",
+      title: "Asteroids",
+      blurb: "Spin, thrust, and clear the field.",
+      tone: "slate",
+      cover: "/app/games/covers/asteroids.jpg",
+      controls: "Left/Right rotate · Up thrust · Space fire",
+    },
+    {
+      id: "missile-command",
+      title: "Missile Command",
+      blurb: "Defend the cities from inbound warheads.",
+      tone: "rust",
+      cover: "/app/games/covers/missile-command.jpg",
+      controls: "Mouse / tap to aim · Click to fire",
+    },
+    {
+      id: "pokemon-red",
+      title: "Pokémon Red",
+      blurb: "Load a .gb / .gbc / .gba ROM once — remembered in this browser with saves.",
+      tone: "gold",
+      cover: "/app/games/covers/pokemon-red.jpg",
+      controls: "Arrows · Z A · X B · Enter Start · Shift Select · saves stay in this browser",
+    },
+    {
+      id: "space-invaders",
+      title: "Space Invaders",
+      blurb: "Hold the line against the descending fleet.",
+      tone: "teal",
+      cover: "/app/games/covers/space-invaders.jpg",
+      controls: "Left/Right move · Space fire",
+    },
+  ];
+
+  function renderGames() {
+    if (!els.games) return;
+    if (state.gamesActiveId) {
+      const game = GAMES_CATALOG.find((g) => g.id === state.gamesActiveId);
+      const already =
+        state.gamesHandle &&
+        els.games.querySelector("#games-stage") &&
+        els.games.dataset.activeGame === state.gamesActiveId;
+      if (already) return;
+
+      els.games.dataset.activeGame = state.gamesActiveId;
+      els.games.innerHTML = `
+        <div class="games-player">
+          <div class="games-player__bar">
+            <button type="button" class="btn btn-soft games-back-btn" data-games-back>Back to library</button>
+            <div class="games-player__meta">
+              <strong>${escapeHtml(game?.title || "Game")}</strong>
+              <p class="muted">${escapeHtml(game?.controls || "")}</p>
+            </div>
+          </div>
+          <div class="games-player__stage" id="games-stage" tabindex="0"></div>
+        </div>`;
+      els.games.querySelector("[data-games-back]")?.addEventListener("click", async () => {
+        await stopActiveGame();
+        state.gamesActiveId = null;
+        delete els.games.dataset.activeGame;
+        renderGames();
+      });
+      const stage = els.games.querySelector("#games-stage");
+      mountGame(state.gamesActiveId, stage);
+      return;
+    }
+
+    delete els.games.dataset.activeGame;
+    els.games.innerHTML = `
+      <div class="games-library">
+        <p class="games-library__lead">Pick a title. Arcade clones run instantly; Pokémon Red needs a ROM you own.</p>
+        <div class="games-grid">
+          ${GAMES_CATALOG.map(
+            (g) => `
+            <button type="button" class="games-tile tone-${g.tone}" data-game-open="${g.id}">
+              <span class="games-tile__media">
+                <img src="${escapeHtml(g.cover)}" alt="" width="480" height="360" loading="lazy" decoding="async" />
+              </span>
+              <span class="games-tile__body">
+                <span class="games-tile__eyebrow">Play</span>
+                <strong>${escapeHtml(g.title)}</strong>
+                <span class="games-tile__blurb">${escapeHtml(g.blurb)}</span>
+              </span>
+            </button>`
+          ).join("")}
+        </div>
+      </div>`;
+    els.games.querySelectorAll("[data-game-open]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        state.gamesActiveId = btn.dataset.gameOpen;
+        renderGames();
+      });
+    });
+  }
+
+  async function mountGame(id, stage) {
+    if (!stage) return;
+    await stopActiveGame();
+    state.gamesActiveId = id;
+    stage.innerHTML = `<div class="games-loading">Loading ${escapeHtml(
+      GAMES_CATALOG.find((g) => g.id === id)?.title || "game"
+    )}…</div>`;
+    try {
+      const mod = await import(`/app/games/index.js?v=7`);
+      if (state.gamesActiveId !== id) return;
+      const handle = await mod.mountGame(id, stage);
+      if (state.gamesActiveId !== id) {
+        if (handle?.destroy) await handle.destroy();
+        return;
+      }
+      state.gamesHandle = handle;
+      stage.focus({ preventScroll: true });
+    } catch (err) {
+      console.error(err);
+      stage.innerHTML = `<div class="games-error">Could not start this game. ${escapeHtml(
+        err?.message || "Try again."
+      )}</div>`;
+    }
   }
 
   function upsertLead(lead, { silent = false } = {}) {
@@ -5941,9 +6151,15 @@
   });
 
   mountRewriteControls(document);
-  setView("home");
-  refresh().catch((err) => {
-    console.error(err);
-    toast("Could not load CRM data");
-  });
+  startIdleWatch();
+  loadSession()
+    .then(() => {
+      setView("home");
+      return refresh();
+    })
+    .catch((err) => {
+      console.error(err);
+      setView("home");
+      toast("Could not load CRM data");
+    });
 })();

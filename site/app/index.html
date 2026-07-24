@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -47,6 +47,8 @@
           <p class="mobile-nav__label">Follow-up</p>
           <button type="button" data-view="reminders">Reminders</button>
           <button type="button" data-view="settings">Settings</button>
+          <p class="mobile-nav__label">Break</p>
+          <button type="button" data-view="games">Games</button>
           <div class="mobile-nav__foot">
             <button type="button" class="btn btn-primary" id="mobile-create">+ Create</button>
             <a class="btn btn-soft" href="/">View site</a>
@@ -85,11 +87,11 @@
           <p class="app-nav__label">Follow-up</p>
           <button type="button" data-view="reminders">Reminders</button>
           <button type="button" data-view="settings">Settings</button>
+
+          <p class="app-nav__label">Break</p>
+          <button type="button" data-view="games">Games</button>
         </nav>
 
-        <div class="app-rail__hint">
-          <p>Flow: client → quote (optional) → build → invoice. Skip quote when you need to.</p>
-        </div>
         <div class="app-rail__foot">
           <a class="btn btn-ghost" href="/">View site</a>
           <button type="button" class="btn btn-ghost" id="sign-out">Sign out</button>
@@ -179,6 +181,7 @@
         <section id="view-vera" aria-label="Vera chats" hidden></section>
         <section id="view-reminders" aria-label="Reminders" hidden></section>
         <section id="view-settings" aria-label="Settings" hidden></section>
+        <section id="view-games" aria-label="Games" hidden></section><!-- games-v1 -->
       </main>
     </div>
 
@@ -548,7 +551,7 @@
             <p class="field-group__label">Reminders</p>
             <label class="field">
               <span>Owner email</span>
-              <input type="email" name="ownerEmail" placeholder="you@vanderven.systems" />
+              <input type="email" name="ownerEmail" placeholder="you@vanderven.ca" />
             </label>
             <p class="field-help">
               <strong>Send</strong> emails the letterhead quote plus selected attachments to the client.
@@ -697,7 +700,7 @@
             <p class="field-group__label">Notes</p>
             <label class="field">
               <span>Shown on invoice</span>
-              <textarea name="notes" rows="2" data-rewrite="invoice" placeholder="E-transfer to hello@vandervensystems.com…"></textarea>
+              <textarea name="notes" rows="2" data-rewrite="invoice" placeholder="E-transfer to hello@vanderven.ca…"></textarea>
             </label>
           </div>
         </form>

@@ -1,4 +1,4 @@
-(() => {
+﻿(() => {
   const page = document.body.dataset.page || "home";
   const solid = page !== "home";
 
@@ -69,7 +69,7 @@
       </nav>
       <div class="site-footer__nav">
         <p class="site-footer__label">Reach us</p>
-        <a href="mailto:hello@vandervensystems.com">hello@vandervensystems.com</a>
+        <a href="mailto:hello@vanderven.ca">hello@vanderven.ca</a>
         <span>Okanagan, British Columbia</span>
         <span>By appointment</span>
       </div>

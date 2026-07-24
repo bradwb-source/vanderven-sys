@@ -3,11 +3,11 @@
  * Terminal user admin for Vanderven CRM (local or remote D1).
  *
  * Examples:
- *   npm run user -- add brad@vanderven.systems --password secret --name Brad --role admin
+ *   npm run user -- add brad@vanderven.ca --password secret --name Brad --role admin
  *   npm run user -- list
- *   npm run user -- get brad@vanderven.systems
- *   npm run user -- set brad@vanderven.systems --owner-days 1,3,7 --client-days 2,5,14
- *   npm run user -- set brad@vanderven.systems --password newpass --client-enabled false
+ *   npm run user -- get brad@vanderven.ca
+ *   npm run user -- set brad@vanderven.ca --owner-days 1,3,7 --client-days 2,5,14
+ *   npm run user -- set brad@vanderven.ca --password newpass --client-enabled false
  *   npm run user -- deactivate other@example.com
  *   npm run user -- add ... --remote
  */

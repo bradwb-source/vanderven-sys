@@ -29,7 +29,7 @@
         }
         form.classList.add("is-sent");
       } catch (err) {
-        alert(err.message || "Something went wrong. Please email hello@vandervensystems.com.");
+        alert(err.message || "Something went wrong. Please email hello@vanderven.ca.");
         if (submit) {
           submit.disabled = false;
           submit.textContent = original || "Start a conversation";
