@@ -496,12 +496,22 @@
           <input type="hidden" name="leadId" />
           <div class="field-group">
             <p class="field-group__label">Client</p>
-            <label class="field">
-              <span>Link client</span>
-              <select name="leadPicker" id="quote-lead-picker">
-                <option value="">Select a client…</option>
-              </select>
-            </label>
+            <div class="client-typeahead" id="quote-client-typeahead">
+              <label class="field">
+                <span>Link client</span>
+                <input
+                  type="search"
+                  id="quote-lead-search"
+                  placeholder="Type business or contact name…"
+                  autocomplete="off"
+                  spellcheck="false"
+                  aria-autocomplete="list"
+                  aria-controls="quote-lead-results"
+                  aria-expanded="false"
+                />
+              </label>
+              <div class="client-typeahead__panel" id="quote-lead-results" hidden role="listbox" aria-label="Matching clients"></div>
+            </div>
           </div>
           <div class="field-group">
             <p class="field-group__label">Quote</p>
@@ -548,14 +558,20 @@
             <div id="quote-attachments" class="quote-attachments"></div>
           </div>
           <div class="field-group">
+            <p class="field-group__label">Client signature</p>
+            <div id="quote-signature-panel" class="quote-signature-panel">
+              <p class="muted">Send the quote to request a signature for approval.</p>
+            </div>
+          </div>
+          <div class="field-group">
             <p class="field-group__label">Reminders</p>
             <label class="field">
               <span>Owner email</span>
               <input type="email" name="ownerEmail" placeholder="you@vanderven.ca" />
             </label>
             <p class="field-help">
-              <strong>Send</strong> emails the letterhead quote plus selected attachments to the client.
-              Reminders still use Settings day offsets after send.
+              <strong>Send</strong> emails the letterhead quote plus a <strong>Review &amp; sign</strong> link.
+              The client must sign to approve. Reminders use Settings day offsets after send.
             </p>
           </div>
         </form>

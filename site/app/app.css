@@ -2661,6 +2661,93 @@ body.is-dragging-job .unscheduled-list {
   line-height: 1.45;
 }
 
+.client-typeahead {
+  position: relative;
+}
+
+.client-typeahead__panel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 0.3rem);
+  z-index: 30;
+  display: grid;
+  gap: 0.2rem;
+  max-height: min(50vh, 18rem);
+  overflow: auto;
+  padding: 0.35rem;
+  border-radius: 12px;
+  background: #1a202b;
+  border: 1px solid rgba(244, 241, 234, 0.14);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+}
+
+.client-typeahead__option {
+  display: grid;
+  gap: 0.15rem;
+  width: 100%;
+  text-align: left;
+  padding: 0.65rem 0.75rem;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #f4f1ea;
+  font: inherit;
+  cursor: pointer;
+}
+
+.client-typeahead__option:hover,
+.client-typeahead__option:focus {
+  outline: none;
+  background: rgba(184, 149, 62, 0.18);
+}
+
+.client-typeahead__option strong {
+  font-size: 0.95rem;
+  font-weight: 650;
+}
+
+.client-typeahead__option span {
+  font-size: 0.8rem;
+  color: rgba(244, 241, 234, 0.55);
+}
+
+.client-typeahead__empty {
+  padding: 0.75rem 0.85rem;
+  font-size: 0.88rem;
+  color: rgba(244, 241, 234, 0.55);
+}
+
+.quote-signature-panel {
+  padding: 0.85rem 0.95rem;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(244, 241, 234, 0.08);
+}
+
+.quote-signature-panel p {
+  margin: 0;
+}
+
+.quote-signature-panel__await {
+  color: #f0d78a;
+  font-weight: 600;
+}
+
+.quote-signature-panel__img {
+  margin-top: 0.75rem;
+  padding: 0.5rem;
+  border-radius: 10px;
+  background: #fffaf3;
+  max-width: 280px;
+}
+
+.quote-signature-panel__img img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
 .quote-attachments {
   display: grid;
   gap: 0.45rem;

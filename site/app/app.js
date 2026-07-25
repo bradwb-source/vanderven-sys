@@ -66,8 +66,8 @@
       sub: "Shared sales inbox — every teammate can open website chats and follow up.",
     },
     reminders: { title: "Reminders", sub: "Automated quote follow-ups for you and the client." },
-    settings: { title: "Settings", sub: "Password, users, quote attachments, and reminders." },
-    games: { title: "Games", sub: "Four quick titles when you need a break." },
+    settings: { title: "Settings", sub: "Password, outbound email, users, quote attachments, and reminders." },
+    games: { title: "Games", sub: "Arcade breakers when you need a minute." },
   };
 
   const LIST_VIEWS = new Set(["clients", "requests", "quotes", "jobs", "invoices"]);
@@ -179,9 +179,12 @@
     quoteDrawerClose: document.getElementById("quote-drawer-close"),
     quoteDrawerTitle: document.getElementById("quote-drawer-title"),
     quoteDrawerMeta: document.getElementById("quote-drawer-meta"),
-    quoteLeadPicker: document.getElementById("quote-lead-picker"),
+    quoteLeadSearch: document.getElementById("quote-lead-search"),
+    quoteLeadResults: document.getElementById("quote-lead-results"),
+    quoteClientTypeahead: document.getElementById("quote-client-typeahead"),
     quoteScheduleBuild: document.getElementById("quote-schedule-build"),
     quoteAttachments: document.getElementById("quote-attachments"),
+    quoteSignaturePanel: document.getElementById("quote-signature-panel"),
     quotePreview: document.getElementById("quote-preview"),
     printQuote: document.getElementById("print-quote"),
     sendQuote: document.getElementById("send-quote"),
@@ -2217,8 +2220,13 @@
   function quoteCardHtml(quote) {
     const meta = statusMeta(QUOTE_STATUSES, quote.status);
     const canSchedule = quote.status !== "declined";
-    const sentLine =
+    let sentLine =
       quote.status === "sent" && quote.sentAt ? `Sent ${formatDate(quote.sentAt)}` : `Updated ${formatDate(quote.updatedAt)}`;
+    if (quote.hasSignature && quote.signedName) {
+      sentLine = `Signed by ${quote.signedName}${quote.signedAt ? ` · ${formatDate(quote.signedAt)}` : ""}`;
+    } else if (quote.awaitingSignature) {
+      sentLine = "Awaiting signature";
+    }
     return `
       <article class="doc-card tone-${meta.tone}" data-open-quote="${escapeHtml(quote.id)}">
         <div class="doc-card__top">
@@ -2265,7 +2273,7 @@
               <strong>${approved.length}</strong>
               <span class="money-stat__meta">${escapeHtml(formatMoney(approvedCents))} ready to build</span>
             </button>
-            <button type="button" class="money-stat" data-create="request">
+            <button type="button" class="money-stat" data-create="client">
               <span class="money-stat__label">New client</span>
               <strong>+</strong>
               <span class="money-stat__meta">Then quote or skip to build</span>
@@ -2305,7 +2313,7 @@
             <strong>${approved.length}</strong>
             <span class="money-stat__meta">Schedule builds next</span>
           </button>
-          <button type="button" class="money-stat" data-create="request">
+          <button type="button" class="money-stat" data-create="client">
             <span class="money-stat__label">Start</span>
             <strong>+</strong>
             <span class="money-stat__meta">New client first</span>
@@ -2411,7 +2419,7 @@
             <strong>${delivered}</strong>
             <span class="money-stat__meta">Shipped</span>
           </button>
-          <button type="button" class="money-stat" data-create="request">
+          <button type="button" class="money-stat" data-create="client">
             <span class="money-stat__label">Start</span>
             <strong>+</strong>
             <span class="money-stat__meta">New client first</span>
@@ -2592,7 +2600,7 @@
               <strong>${overdue.length}</strong>
               <span class="money-stat__meta">Need a chase</span>
             </button>
-            <button type="button" class="money-stat" data-create="request">
+            <button type="button" class="money-stat" data-create="client">
               <span class="money-stat__label">New client</span>
               <strong>+</strong>
               <span class="money-stat__meta">Then invoice from client</span>
@@ -2632,7 +2640,7 @@
             <strong>${escapeHtml(formatMoney(paidCents))}</strong>
             <span class="money-stat__meta">${paid.length} collected</span>
           </button>
-          <button type="button" class="money-stat" data-create="request">
+          <button type="button" class="money-stat" data-create="client">
             <span class="money-stat__label">Start</span>
             <strong>+</strong>
             <span class="money-stat__meta">New client first</span>
@@ -2901,6 +2909,8 @@
   function renderSettings() {
     const s = state.reminderSettings || {
       ownerEmail: "",
+      sendFromEmail: "",
+      sendAsName: "",
       ownerEnabled: true,
       ownerDays: [2, 5, 10],
       clientEnabled: true,
@@ -2910,6 +2920,13 @@
     const isAdmin = state.sessionUser?.role === "admin" || state.sessionUser?.isOwner;
     const isOwner = !!state.sessionUser?.isOwner;
     const users = state.users || [];
+    const sendFrom =
+      s.sendFromEmail || s.ownerEmail || state.sessionUser?.email || "";
+    const sendAsName =
+      s.sendAsName != null && s.sendAsName !== ""
+        ? s.sendAsName
+        : state.sessionUser?.sendAsName || state.sessionUser?.name || "";
+    const fromPreview = sendAsName ? `${sendAsName} <${sendFrom}>` : sendFrom;
 
     els.settings.innerHTML = `
       <div class="settings-panel">
@@ -3109,8 +3126,36 @@
 
         <form id="reminder-settings-form">
           <div class="settings-block">
+            <h2>Outbound email</h2>
+            <p class="muted">
+              Quotes, invoices, and follow-ups you send go out from your login email.
+              Each teammate sends as themselves.
+            </p>
+            <div class="field-row">
+              <label class="field">
+                <span>Sends from</span>
+                <input type="email" value="${escapeHtml(sendFrom)}" readonly />
+              </label>
+              <label class="field">
+                <span>Display name</span>
+                <input
+                  name="sendAsName"
+                  value="${escapeHtml(sendAsName)}"
+                  placeholder="Brad"
+                  maxlength="80"
+                  autocomplete="name"
+                />
+              </label>
+            </div>
+            <p class="field-help">
+              Clients see <strong>${escapeHtml(fromPreview || "your email")}</strong>.
+              Reply-to uses the same address. Domain must be verified in Resend.
+            </p>
+          </div>
+
+          <div class="settings-block">
             <h2>Quote reminders</h2>
-            <p class="muted">Automated follow-ups after a quote is marked <strong>Sent</strong>. These settings apply to your user account.</p>
+            <p class="muted">Automated follow-ups after a quote is marked <strong>Sent</strong>. These settings apply to your user account. Follow-ups send from the quote owner’s outbound email above.</p>
 
             <h3 class="settings-block__subhead">Internal (you)</h3>
             <label class="checkbox-field">
@@ -3119,8 +3164,8 @@
             </label>
             <div class="field-row">
               <label class="field">
-                <span>Your login email</span>
-                <input type="email" value="${escapeHtml(s.ownerEmail || "")}" readonly />
+                <span>Your inbox (To)</span>
+                <input type="email" value="${escapeHtml(s.ownerEmail || sendFrom)}" readonly />
               </label>
               <label class="field">
                 <span>Days after sent</span>
@@ -3146,7 +3191,7 @@
               <input type="checkbox" name="stopOnClosed" ${s.stopOnClosed ? "checked" : ""} />
               <span>Stop reminders once a quote is approved or declined</span>
             </label>
-            <p class="field-help">Daily cron processes due reminders. Without <code>RESEND_API_KEY</code>, messages are logged in Reminders (demo mode).</p>
+            <p class="field-help">Daily cron processes due reminders. Without <code>RESEND_API_KEY</code>, messages are logged in Reminders (no real send).</p>
 
             <div class="settings-actions">
               <button type="submit" class="btn btn-primary">Save settings</button>
@@ -3310,6 +3355,7 @@
       event.preventDefault();
       const form = new FormData(event.currentTarget);
       const payload = {
+        sendAsName: String(form.get("sendAsName") || "").trim(),
         ownerEnabled: form.get("ownerEnabled") === "on",
         ownerDays: form.get("ownerDays"),
         clientEnabled: form.get("clientEnabled") === "on",
@@ -3325,7 +3371,7 @@
         });
         state.reminderSettings = data.settings;
         if (data.user) state.sessionUser = data.user;
-        toast("Reminder settings saved");
+        toast("Settings saved");
         render();
       } catch (err) {
         toast(err.message || "Could not save settings");
@@ -3363,12 +3409,28 @@
       controls: "Left/Right rotate · Up thrust · Space fire",
     },
     {
+      id: "breakout",
+      title: "Breakout",
+      blurb: "Bounce the ball and clear every brick.",
+      tone: "rust",
+      cover: "/app/games/covers/breakout.jpg",
+      controls: "Left/Right or mouse · Space / click to serve",
+    },
+    {
       id: "missile-command",
       title: "Missile Command",
       blurb: "Defend the cities from inbound warheads.",
       tone: "rust",
       cover: "/app/games/covers/missile-command.jpg",
       controls: "Mouse / tap to aim · Click to fire",
+    },
+    {
+      id: "pac-man",
+      title: "Pac-Man",
+      blurb: "Eat the pellets. Don’t get ghosted.",
+      tone: "gold",
+      cover: "/app/games/covers/pac-man.jpg",
+      controls: "Arrow keys · power pellets scare the ghosts",
     },
     {
       id: "pokemon-red",
@@ -3379,12 +3441,28 @@
       controls: "Arrows · Z A · X B · Enter Start · Shift Select · saves stay in this browser",
     },
     {
+      id: "snake",
+      title: "Snake",
+      blurb: "Grow longer. Don’t hit the walls — or yourself.",
+      tone: "teal",
+      cover: "/app/games/covers/snake.jpg",
+      controls: "Arrow keys / WASD",
+    },
+    {
       id: "space-invaders",
       title: "Space Invaders",
       blurb: "Hold the line against the descending fleet.",
       tone: "teal",
       cover: "/app/games/covers/space-invaders.jpg",
       controls: "Left/Right move · Space fire",
+    },
+    {
+      id: "tetris",
+      title: "Tetris",
+      blurb: "Rotate, drop, and clear the lines.",
+      tone: "slate",
+      cover: "/app/games/covers/tetris.jpg",
+      controls: "Left/Right move · Up rotate · Down soft · Space hard drop",
     },
   ];
 
@@ -3457,7 +3535,7 @@
       GAMES_CATALOG.find((g) => g.id === id)?.title || "game"
     )}…</div>`;
     try {
-      const mod = await import(`/app/games/index.js?v=7`);
+      const mod = await import(`/app/games/index.js?v=8`);
       if (state.gamesActiveId !== id) return;
       const handle = await mod.mountGame(id, stage);
       if (state.gamesActiveId !== id) {
@@ -4448,6 +4526,7 @@
 
   function openNewLead() {
     state.clientDetail = null;
+    if (state.view !== "clients") setView("clients");
     els.drawerTitle.textContent = "New client";
     els.drawerMeta.textContent = "Full client record — quote or build when ready";
     els.form.reset();
@@ -4464,6 +4543,7 @@
 
   function openNewRequest() {
     state.clientDetail = null;
+    if (state.view !== "requests") setView("requests");
     els.drawerTitle.textContent = "New request";
     els.drawerMeta.textContent = "Internal handoff · Rob → Brad";
     els.form.reset();
@@ -4628,18 +4708,98 @@
     }
   }
 
+  function leadSearchLabel(lead) {
+    const business = (lead.business || "").trim();
+    const name = (lead.name || "").trim();
+    if (business && name && business.toLowerCase() !== name.toLowerCase()) {
+      return `${business} · ${name}`;
+    }
+    return business || name || lead.email || "Client";
+  }
+
+  function leadMatchesQuery(lead, query) {
+    const q = String(query || "")
+      .trim()
+      .toLowerCase();
+    if (!q) return true;
+    const hay = [lead.business, lead.name, lead.email, lead.phone, lead.city, lead.industry]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+    return q.split(/\s+/).every((part) => hay.includes(part));
+  }
+
   function fillQuoteLeadPicker(selectedId = "") {
-    if (!els.quoteLeadPicker) return;
-    els.quoteLeadPicker.innerHTML =
-      `<option value="">Select a client…</option>` +
-      state.leads
-        .map(
-          (lead) =>
-            `<option value="${escapeHtml(lead.id)}" ${lead.id === selectedId ? "selected" : ""}>${escapeHtml(
-              lead.business || lead.name
-            )}</option>`
-        )
-        .join("");
+    if (!els.quoteLeadSearch) return;
+    const lead = selectedId ? state.leads.find((l) => l.id === selectedId) : null;
+    els.quoteLeadSearch.value = lead ? leadSearchLabel(lead) : "";
+    els.quoteLeadSearch.dataset.selectedId = lead?.id || "";
+    closeQuoteLeadResults();
+  }
+
+  function closeQuoteLeadResults() {
+    if (!els.quoteLeadResults || !els.quoteLeadSearch) return;
+    els.quoteLeadResults.hidden = true;
+    els.quoteLeadResults.innerHTML = "";
+    els.quoteLeadSearch.setAttribute("aria-expanded", "false");
+  }
+
+  function selectQuoteLead(leadId) {
+    if (!els.quoteForm) return;
+    els.quoteForm.leadId.value = leadId || "";
+    const lead = leadId ? state.leads.find((l) => l.id === leadId) : null;
+    if (els.quoteLeadSearch) {
+      els.quoteLeadSearch.value = lead ? leadSearchLabel(lead) : "";
+      els.quoteLeadSearch.dataset.selectedId = lead?.id || "";
+    }
+    closeQuoteLeadResults();
+    if (!lead) {
+      refreshQuotePreview();
+      return;
+    }
+    if (!els.quoteForm.clientName.value) {
+      els.quoteForm.clientName.value = lead.business || lead.name || "";
+    }
+    if (!els.quoteForm.title.value) {
+      els.quoteForm.title.value = `${lead.business || lead.name} — services`;
+    }
+    refreshQuotePreview();
+  }
+
+  function renderQuoteLeadResults(query = "") {
+    if (!els.quoteLeadResults || !els.quoteLeadSearch) return;
+    const q = String(query || "").trim();
+    const matches = (state.leads || [])
+      .filter((lead) => leadMatchesQuery(lead, q))
+      .slice(0, 12);
+    if (!q) {
+      closeQuoteLeadResults();
+      return;
+    }
+    if (!matches.length) {
+      els.quoteLeadResults.innerHTML = `<div class="client-typeahead__empty">No clients match “${escapeHtml(
+        q
+      )}”</div>`;
+      els.quoteLeadResults.hidden = false;
+      els.quoteLeadSearch.setAttribute("aria-expanded", "true");
+      return;
+    }
+    els.quoteLeadResults.innerHTML = matches
+      .map((lead, index) => {
+        const sub = [lead.email, lead.phone, lead.city].filter(Boolean).join(" · ");
+        return `<button type="button" class="client-typeahead__option" role="option" data-lead-id="${escapeHtml(
+          lead.id
+        )}" data-index="${index}">
+          <strong>${escapeHtml(lead.business || lead.name || "Client")}</strong>
+          <span>${escapeHtml(sub || lead.name || "")}</span>
+        </button>`;
+      })
+      .join("");
+    els.quoteLeadResults.hidden = false;
+    els.quoteLeadSearch.setAttribute("aria-expanded", "true");
+    els.quoteLeadResults.querySelectorAll("[data-lead-id]").forEach((btn) => {
+      btn.addEventListener("click", () => selectQuoteLead(btn.dataset.leadId));
+    });
   }
 
   function setQuoteScheduleBuildVisible(show) {
@@ -4963,9 +5123,50 @@
     return data.quote;
   }
 
-  function openQuote(id) {
-    const quote = state.quotes.find((q) => q.id === id);
+  function renderQuoteSignaturePanel(quote) {
+    const panel = els.quoteSignaturePanel;
+    if (!panel) return;
+    if (!quote?.id) {
+      panel.innerHTML = `<p class="muted">Send the quote to request a signature for approval.</p>`;
+      return;
+    }
+    if (quote.hasSignature || (quote.status === "approved" && quote.signedName)) {
+      panel.innerHTML = `
+        <p><strong>Signed by ${escapeHtml(quote.signedName || "Client")}</strong>
+        ${quote.signedAt ? ` · ${escapeHtml(formatDate(quote.signedAt))}` : ""}</p>
+        ${
+          quote.signaturePng
+            ? `<div class="quote-signature-panel__img"><img src="${escapeHtml(
+                quote.signaturePng
+              )}" alt="Client signature" /></div>`
+            : `<p class="field-help">Signature on file.</p>`
+        }`;
+      return;
+    }
+    if (quote.awaitingSignature || quote.status === "sent" || quote.status === "revisions_requested") {
+      panel.innerHTML = `<p class="quote-signature-panel__await">Awaiting client signature</p>
+        <p class="field-help">The client received a secure <strong>Review &amp; sign</strong> link. Signing sets this quote to Approved.</p>`;
+      return;
+    }
+    if (quote.status === "declined") {
+      panel.innerHTML = `<p class="muted">Client declined this quote (no signature required).</p>`;
+      return;
+    }
+    panel.innerHTML = `<p class="muted">Send the quote to request a signature for approval.</p>`;
+  }
+
+  async function openQuote(id) {
+    let quote = state.quotes.find((q) => q.id === id);
     if (!quote) return;
+    try {
+      const data = await api(`/api/quotes/${encodeURIComponent(id)}`);
+      if (data.quote) {
+        upsertQuote(data.quote);
+        quote = data.quote;
+      }
+    } catch {
+      /* use list payload */
+    }
     els.quoteDrawerTitle.textContent = quote.number;
     els.quoteDrawerMeta.textContent = statusMeta(QUOTE_STATUSES, quote.status).label;
     els.quoteForm.id.value = quote.id;
@@ -4980,17 +5181,16 @@
     fillQuoteLeadPicker(quote.leadId || "");
     setQuoteScheduleBuildVisible(quote.status !== "declined");
     renderQuoteAttachments(quote.documentIds || []);
+    renderQuoteSignaturePanel(quote);
     refreshQuotePreview();
     openOnly(els.quoteDrawer, { create: false, deleteBtn: els.deleteQuote });
   }
 
   function openNewQuote({ leadId = "", clientName = "" } = {}) {
-    if (!leadId) {
-      requireClientFirst("create a quote");
-      return;
-    }
     els.quoteDrawerTitle.textContent = "New quote";
-    els.quoteDrawerMeta.textContent = "Optional step — you can skip this and start a build instead";
+    els.quoteDrawerMeta.textContent = leadId
+      ? "Optional step — you can skip this and start a build instead"
+      : "Search and select a client, then fill the quote";
     els.quoteForm.reset();
     els.quoteForm.id.value = "";
     els.quoteForm.status.value = "draft";
@@ -5000,9 +5200,13 @@
     fillQuoteLeadPicker(leadId || "");
     setQuoteScheduleBuildVisible(false);
     renderQuoteAttachments(defaultQuoteDocumentIds());
+    renderQuoteSignaturePanel(null);
     refreshQuotePreview();
     openOnly(els.quoteDrawer, { create: true, deleteBtn: els.deleteQuote });
-    setTimeout(() => els.quoteForm.title.focus(), 50);
+    setTimeout(() => {
+      if (leadId) els.quoteForm.title.focus();
+      else els.quoteLeadSearch?.focus();
+    }, 50);
   }
 
   function emptyInvoiceLine(overrides = {}) {
@@ -5503,7 +5707,7 @@
     if (kind === "request") openNewRequest();
     else if (kind === "client") openNewLead();
     else if (kind === "job") requireClientFirst("start a build");
-    else if (kind === "quote") requireClientFirst("create a quote");
+    else if (kind === "quote") openNewQuote();
     else if (kind === "invoice") requireClientFirst("create an invoice");
   }
 
@@ -5927,22 +6131,60 @@
     }
   });
 
-  els.quoteLeadPicker?.addEventListener("change", () => {
-    const leadId = els.quoteLeadPicker.value;
-    els.quoteForm.leadId.value = leadId || "";
-    if (!leadId) {
-      refreshQuotePreview();
+  els.quoteLeadSearch?.addEventListener("input", () => {
+    const value = els.quoteLeadSearch.value;
+    const selectedId = els.quoteLeadSearch.dataset.selectedId || "";
+    if (selectedId) {
+      const selected = state.leads.find((l) => l.id === selectedId);
+      if (!selected || leadSearchLabel(selected) !== value) {
+        els.quoteLeadSearch.dataset.selectedId = "";
+        if (els.quoteForm?.leadId) els.quoteForm.leadId.value = "";
+      }
+    }
+    renderQuoteLeadResults(value);
+  });
+  els.quoteLeadSearch?.addEventListener("focus", () => {
+    if (els.quoteLeadSearch.value.trim()) renderQuoteLeadResults(els.quoteLeadSearch.value);
+  });
+  els.quoteLeadSearch?.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      closeQuoteLeadResults();
       return;
     }
-    const lead = state.leads.find((l) => l.id === leadId);
-    if (!lead) return;
-    if (!els.quoteForm.clientName.value) {
-      els.quoteForm.clientName.value = lead.business || lead.name || "";
+    if (event.key === "Enter") {
+      const first = els.quoteLeadResults?.querySelector("[data-lead-id]");
+      if (first && !els.quoteLeadResults.hidden) {
+        event.preventDefault();
+        selectQuoteLead(first.dataset.leadId);
+      }
     }
-    if (!els.quoteForm.title.value) {
-      els.quoteForm.title.value = `${lead.business || lead.name} — services`;
+    if (event.key === "ArrowDown") {
+      const first = els.quoteLeadResults?.querySelector("[data-lead-id]");
+      if (first) {
+        event.preventDefault();
+        first.focus();
+      }
     }
-    refreshQuotePreview();
+  });
+  els.quoteLeadResults?.addEventListener("keydown", (event) => {
+    const options = [...(els.quoteLeadResults?.querySelectorAll("[data-lead-id]") || [])];
+    const idx = options.indexOf(document.activeElement);
+    if (event.key === "ArrowDown" && idx >= 0 && idx < options.length - 1) {
+      event.preventDefault();
+      options[idx + 1].focus();
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      if (idx <= 0) els.quoteLeadSearch?.focus();
+      else options[idx - 1].focus();
+    }
+    if (event.key === "Escape") {
+      closeQuoteLeadResults();
+      els.quoteLeadSearch?.focus();
+    }
+  });
+  document.addEventListener("click", (event) => {
+    if (!els.quoteClientTypeahead?.contains(event.target)) closeQuoteLeadResults();
   });
 
   els.quoteScheduleBuild?.addEventListener("click", async () => {
@@ -6014,13 +6256,17 @@
       els.quoteForm.status.value = data.quote.status || "sent";
       els.quoteDrawerMeta.textContent = statusMeta(QUOTE_STATUSES, data.quote.status).label;
       renderQuoteAttachments(data.quote.documentIds || []);
+      renderQuoteSignaturePanel(data.quote);
       refreshQuotePreview();
       const n = (data.documents || []).length;
       const channel = data.delivery?.channel;
+      const from = data.delivery?.from || state.sessionUser?.email || "";
       toast(
         channel === "email"
-          ? `Quote emailed to ${lead.email}${n ? ` · ${n} attachment(s)` : ""}`
-          : `Quote marked sent (demo inbox — wire RESEND to email ${lead.email})${
+          ? `Quote emailed to ${lead.email} with sign link${from ? ` · from ${from}` : ""}${
+              n ? ` · ${n} attachment(s)` : ""
+            }`
+          : `Quote marked sent with sign link (no RESEND_API_KEY — not emailed)${
               n ? ` · ${n} attachment(s)` : ""
             }`
       );
@@ -6103,10 +6349,11 @@
       els.invoiceDrawerMeta.textContent = statusMeta(INVOICE_STATUSES, data.invoice.status).label;
       refreshInvoicePreview();
       const channel = data.delivery?.channel;
+      const from = data.delivery?.from || state.sessionUser?.email || "";
       toast(
         channel === "email"
-          ? `Invoice emailed to ${draft.billToEmail}`
-          : `Invoice marked sent (demo inbox — wire RESEND to email ${draft.billToEmail})`
+          ? `Invoice emailed to ${draft.billToEmail}${from ? ` from ${from}` : ""}`
+          : `Invoice marked sent (no RESEND_API_KEY — not emailed to ${draft.billToEmail})`
       );
       render();
     } catch (err) {

@@ -15,7 +15,9 @@
       "/login",
       "/login.html",
       "/app",
-      "/app/*"
+      "/app/*",
+      "/sign",
+      "/sign/*"
     ]
   },
   "d1_databases": [

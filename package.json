@@ -9,6 +9,7 @@
     "user": "node scripts/crm-user.mjs"
   },
   "devDependencies": {
+    "opentype.js": "^2.0.0",
     "wrangler": "^4.24.0"
   },
   "allowScripts": {

@@ -159,6 +159,7 @@ function rowToUser(row, { includeSecrets = false } = {}) {
     id: row.id,
     email: row.email,
     name: row.name || "",
+    sendAsName: row.send_as_name != null ? String(row.send_as_name) : "",
     role: isOwner ? "admin" : row.role || "member",
     active: Number(row.active) !== 0,
     isOwner,
@@ -760,64 +761,7 @@ function rowToLead(row) {
   };
 }
 
-async function ensureSeeded(env) {
-  if (!env.DB) return;
-  const count = await env.DB.prepare("SELECT COUNT(*) AS c FROM leads").first();
-  if (count && Number(count.c) > 0) return;
-  const ts = nowIso();
-  const seed = [
-    ["lead_demo_01", "Jordan Lee", "Valley Mechanical Ltd.", "jordan@valleymech.ca", "(250) 555-0142", "Trades / HVAC / plumbing / electrical", "new", "demo", "Most jobs come in by phone while on site. Quotes go out same day, then sit with no follow-up.", "1840 Industrial Ave", "Kelowna", "BC", "V1Y 7R2", "Canada"],
-    ["lead_demo_02", "Sam Rivera", "Okanagan Homes Realty", "sam@okanaganhomes.ca", "(250) 555-0198", "Real estate", "audit", "demo", "Listing inquiries sit over the weekend. Wants faster first response and a cleaner site.", "312 Bernard Ave", "Kelowna", "BC", "V1Y 6N5", "Canada"],
-    ["lead_demo_03", "Alex Chen", "Lakeside Property Group", "alex@lakesidepm.ca", "(250) 555-0110", "Property management", "quoted", "demo", "Maintenance emails go cold. Owners want clearer updates without chasing the office.", "245 Lakeshore Rd", "Penticton", "BC", "V2A 1B4", "Canada"],
-    ["lead_demo_04", "Morgan Blake", "Blake Advisory", "morgan@blakeadvisory.ca", "(250) 555-0166", "Professional services", "active", "demo", "Intake forms stall between meetings. Calendar and CRM need to talk to each other.", "901 Ellis St", "Kelowna", "BC", "V1Y 1Z5", "Canada"],
-    ["lead_demo_05", "Casey Nguyen", "Green Ridge Landscaping", "casey@greenridge.ca", "(250) 555-0133", "Lawn care / landscaping / seasonal", "won", "demo", "Seasonal lead spike. Needed a simple site and quote follow-up that doesn’t wait for evenings.", "78 Greenway Dr", "Vernon", "BC", "V1T 9H2", "Canada"],
-  ];
-  try {
-    const stmt = env.DB.prepare(
-      `INSERT OR IGNORE INTO leads
-        (id, name, business, email, phone, industry, stage, source, notes,
-         address_line, city, region, postal_code, country, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    );
-    await env.DB.batch(
-      seed.map(
-        ([id, name, business, email, phone, industry, stage, source, notes, line, city, region, postal, country]) =>
-          stmt.bind(
-            id,
-            name,
-            business,
-            email,
-            phone,
-            industry,
-            stage,
-            source,
-            notes,
-            line,
-            city,
-            region,
-            postal,
-            country,
-            ts,
-            ts
-          )
-      )
-    );
-  } catch {
-    // Address columns missing until migration 0007 is applied.
-    const stmt = env.DB.prepare(
-      `INSERT OR IGNORE INTO leads (id, name, business, email, phone, industry, stage, source, notes, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    );
-    await env.DB.batch(
-      seed.map(([id, name, business, email, phone, industry, stage, source, notes]) =>
-        stmt.bind(id, name, business, email, phone, industry, stage, source, notes, ts, ts)
-      )
-    );
-  }
-}
-
 async function listLeads(env, { stage, q } = {}) {
-  await ensureSeeded(env);
   let sql = "SELECT * FROM leads";
   const clauses = [];
   const binds = [];
@@ -2166,9 +2110,6 @@ function buildTimeline(lead, { notes, activity, quotes, jobs, invoices, reminder
 }
 
 async function getLeadDetail(env, id) {
-  await ensureSeeded(env);
-  await ensureJobsSeeded(env);
-  await ensureQuotesInvoicesSeeded(env);
   const lead = await getLead(env, id);
   if (!lead) return null;
   const related = await relatedForLead(env, lead);
@@ -2231,44 +2172,7 @@ function rowToJob(row) {
   };
 }
 
-async function ensureJobsSeeded(env) {
-  if (!env.DB) return;
-  await ensureSeeded(env);
-  const count = await env.DB.prepare("SELECT COUNT(*) AS c FROM jobs").first();
-  if (count && Number(count.c) > 0) return;
-
-  const ts = nowIso();
-  const today = new Date();
-  const isoDay = (offset) => {
-    const d = new Date(today);
-    d.setHours(12, 0, 0, 0);
-    d.setDate(d.getDate() + offset);
-    return d.toISOString().slice(0, 10);
-  };
-
-  const seed = [
-    ["job_demo_01", "lead_demo_01", "Site audit — Valley Mechanical", "Valley Mechanical Ltd.", "Brad", "rough_draft", isoDay(0), "09:00", 90, "Walk the shop floor and map phone → quote handoff.", "teal", 0],
-    ["job_demo_02", "lead_demo_02", "Website review — Okanagan Homes", "Okanagan Homes Realty", "Riley", "architecture", isoDay(1), "11:00", 60, "Listing inquiry response path + weekend backlog.", "gold", 1],
-    ["job_demo_03", "lead_demo_03", "Owner update demo — Lakeside", "Lakeside Property Group", "Morgan", "fine_tuning", isoDay(2), "14:00", 120, "Show maintenance ticket status board.", "indigo", 2],
-    ["job_demo_04", "lead_demo_04", "CRM + calendar sync consult", "Blake Advisory", "Brad", "unscheduled", null, null, 90, "Intake form stalls between meetings.", "rust", 3],
-    ["job_demo_05", "lead_demo_05", "Seasonal intake setup", "Green Ridge Landscaping", "Riley", "client_approval", isoDay(3), "10:30", 60, "Quote follow-up that doesn’t wait for evenings.", "teal", 4],
-    ["job_demo_06", null, "Open discovery call", "Inbound lead", "", "unscheduled", null, null, 45, "Parked until we confirm industry fit.", "slate", 5],
-  ];
-
-  const stmt = env.DB.prepare(
-    `INSERT OR IGNORE INTO jobs
-      (id, lead_id, title, client_name, assignee, status, scheduled_date, start_time, duration_min, notes, color, sort_order, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  );
-  await env.DB.batch(
-    seed.map(([id, leadId, title, client, assignee, status, date, time, dur, notes, color, order]) =>
-      stmt.bind(id, leadId, title, client, assignee, status, date, time, dur, notes, color, order, ts, ts)
-    )
-  );
-}
-
 async function listJobs(env, { from, to, status } = {}) {
-  await ensureJobsSeeded(env);
   let sql = "SELECT * FROM jobs";
   const clauses = [];
   const binds = [];
@@ -2314,7 +2218,6 @@ async function resolveLeadForJob(env, job) {
 }
 
 async function getJobDetail(env, id) {
-  await ensureJobsSeeded(env);
   const job = await getJob(env, id);
   if (!job) return null;
   const lead = await resolveLeadForJob(env, job);
@@ -2581,8 +2484,9 @@ function moneyToCents(value, { alreadyCents = false } = {}) {
   return alreadyCents ? Math.round(num) : Math.round(num * 100);
 }
 
-function rowToQuote(row) {
-  return {
+function rowToQuote(row, { includeSignature = false } = {}) {
+  const hasSignature = Boolean(row.signature_png && String(row.signature_png).length > 40);
+  const quote = {
     id: row.id,
     leadId: row.lead_id || null,
     number: row.number,
@@ -2594,9 +2498,24 @@ function rowToQuote(row) {
     sentAt: row.sent_at || null,
     ownerEmail: row.owner_email || "",
     documentIds: [],
+    signedAt: row.signed_at || null,
+    signedName: row.signed_name || "",
+    hasSignature,
+    awaitingSignature:
+      (row.status === "sent" || row.status === "revisions_requested") && !hasSignature,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+  if (includeSignature) {
+    quote.signaturePng = row.signature_png || "";
+    quote.signedIp = row.signed_ip || "";
+  }
+  return quote;
+}
+
+function newSignToken() {
+  const bytes = crypto.getRandomValues(new Uint8Array(24));
+  return b64url(bytes);
 }
 
 function rowToQuoteDocument(row) {
@@ -2748,7 +2667,7 @@ async function enrichQuote(env, quote) {
   return { ...quote, documentIds };
 }
 
-function buildQuoteLetterheadHtml(quote, documents = [], { absoluteLogoUrl = "" } = {}) {
+function buildQuoteLetterheadHtml(quote, documents = [], { absoluteLogoUrl = "", signUrl = "" } = {}) {
   const logo = absoluteLogoUrl
     ? `<img src="${escapeHtmlText(absoluteLogoUrl)}" alt="Vanderven Systems" width="140" style="display:block;max-width:140px;height:auto;" />`
     : `<div style="font-family:Georgia,serif;font-size:22px;font-weight:700;color:#1c2430;">Vanderven <span style="font-weight:500;color:#8a7340;">Systems</span></div>`;
@@ -2800,6 +2719,14 @@ function buildQuoteLetterheadHtml(quote, documents = [], { absoluteLogoUrl = "" 
               </div>`
             : ""
         }
+        ${
+          signUrl
+            ? `<div style="margin-top:28px;text-align:center;">
+                <a href="${escapeHtmlText(signUrl)}" style="display:inline-block;padding:14px 22px;background:#b8953e;color:#141820;text-decoration:none;font-weight:700;font-size:14px;border-radius:10px;">Review &amp; sign to approve</a>
+                <p style="margin:12px 0 0;font-size:12px;color:#5c6570;line-height:1.5;">This quote needs your signature before we start.</p>
+              </div>`
+            : ""
+        }
         <div style="margin-top:28px;padding-top:16px;border-top:1px solid #e6e1d6;font-size:12px;color:#5c6570;line-height:1.55;">
           Questions? Reply to this email or write <strong style="color:#1c2430;">${escapeHtmlText(COMPANY.email)}</strong>.<br/>
           — ${escapeHtmlText(COMPANY.name)} · ${escapeHtmlText(COMPANY.web)}
@@ -2810,7 +2737,7 @@ function buildQuoteLetterheadHtml(quote, documents = [], { absoluteLogoUrl = "" 
 </body></html>`;
 }
 
-function buildQuotePlainText(quote, documents = []) {
+function buildQuotePlainText(quote, documents = [], { signUrl = "" } = {}) {
   const docs = (documents || []).map((d) => `- ${d.title}: ${d.summary || d.kind}`).join("\n");
   return [
     `${COMPANY.name} — Quote ${quote.number}`,
@@ -2821,6 +2748,7 @@ function buildQuotePlainText(quote, documents = []) {
     "",
     quote.notes || "Scope and deliverables as discussed.",
     docs ? `\nAttached:\n${docs}` : "",
+    signUrl ? `\nReview & sign to approve:\n${signUrl}\n\nThis quote needs your signature before we start.` : "",
     "",
     `— ${COMPANY.name} · ${COMPANY.email}`,
   ]
@@ -2882,6 +2810,8 @@ function userToReminderSettings(user) {
   if (!user) return null;
   return {
     ownerEmail: user.email || "",
+    sendFromEmail: user.email || "",
+    sendAsName: user.sendAsName || "",
     ownerEnabled: user.ownerEnabled,
     ownerDays: user.ownerDays,
     clientEnabled: user.clientEnabled,
@@ -2890,6 +2820,21 @@ function userToReminderSettings(user) {
     updatedAt: user.updatedAt,
     userId: user.id,
   };
+}
+
+/** Format Resend From for a CRM user (login email + optional display name). */
+function formatOutboundFrom(user, env) {
+  const email = cleanText(user?.email || "", 160).toLowerCase();
+  if (!email) {
+    return (
+      env.REMINDER_FROM_EMAIL ||
+      env.NOTIFY_FROM_EMAIL ||
+      "Vanderven Systems <brad@vanderven.ca>"
+    );
+  }
+  const name = cleanText(user?.sendAsName || user?.name || "", 80);
+  if (name) return `${name} <${email}>`;
+  return email;
 }
 
 function rowToReminder(row) {
@@ -2939,7 +2884,6 @@ async function defaultReminderSettings(env) {
 
 async function ensureReminderSettings(env, user = null) {
   if (!env.DB) return null;
-  await ensureQuotesInvoicesSeeded(env);
   await ensureUsers(env);
   await backfillQuoteSentAt(env);
 
@@ -2982,36 +2926,80 @@ async function updateReminderSettings(env, body, user) {
     if (!existing) return { error: "User not found.", status: 404 };
     const ownerDays = parseDayList(body.ownerDays ?? body.owner_days ?? existing.owner_days, [2, 5, 10]);
     const clientDays = parseDayList(body.clientDays ?? body.client_days ?? existing.client_days, [3, 7, 14]);
+    const sendAsName =
+      body.sendAsName !== undefined || body.send_as_name !== undefined
+        ? cleanText(body.sendAsName ?? body.send_as_name, 80)
+        : existing.send_as_name != null
+          ? String(existing.send_as_name)
+          : "";
+    const ts = nowIso();
 
-    await env.DB.prepare(
-      `UPDATE users SET
-        owner_enabled = ?, owner_days = ?,
-        client_enabled = ?, client_days = ?, stop_on_closed = ?, updated_at = ?
-       WHERE id = ?`
-    )
-      .bind(
-        body.ownerEnabled !== undefined || body.owner_enabled !== undefined
-          ? body.ownerEnabled ?? body.owner_enabled
-            ? 1
-            : 0
-          : existing.owner_enabled,
-        ownerDays.join(","),
-        body.clientEnabled !== undefined || body.client_enabled !== undefined
-          ? body.clientEnabled ?? body.client_enabled
-            ? 1
-            : 0
-          : existing.client_enabled,
-        clientDays.join(","),
-        body.stopOnClosed !== undefined || body.stop_on_closed !== undefined
-          ? body.stopOnClosed ?? body.stop_on_closed
-            ? 1
-            : 0
-          : existing.stop_on_closed,
-        nowIso(),
-        user.id
+    try {
+      await env.DB.prepare(
+        `UPDATE users SET
+          send_as_name = ?,
+          owner_enabled = ?, owner_days = ?,
+          client_enabled = ?, client_days = ?, stop_on_closed = ?, updated_at = ?
+         WHERE id = ?`
       )
-      .run();
-    return { settings: await ensureReminderSettings(env, { id: user.id }) };
+        .bind(
+          sendAsName,
+          body.ownerEnabled !== undefined || body.owner_enabled !== undefined
+            ? body.ownerEnabled ?? body.owner_enabled
+              ? 1
+              : 0
+            : existing.owner_enabled,
+          ownerDays.join(","),
+          body.clientEnabled !== undefined || body.client_enabled !== undefined
+            ? body.clientEnabled ?? body.client_enabled
+              ? 1
+              : 0
+            : existing.client_enabled,
+          clientDays.join(","),
+          body.stopOnClosed !== undefined || body.stop_on_closed !== undefined
+            ? body.stopOnClosed ?? body.stop_on_closed
+              ? 1
+              : 0
+            : existing.stop_on_closed,
+          ts,
+          user.id
+        )
+        .run();
+    } catch {
+      await env.DB.prepare(
+        `UPDATE users SET
+          owner_enabled = ?, owner_days = ?,
+          client_enabled = ?, client_days = ?, stop_on_closed = ?, updated_at = ?
+         WHERE id = ?`
+      )
+        .bind(
+          body.ownerEnabled !== undefined || body.owner_enabled !== undefined
+            ? body.ownerEnabled ?? body.owner_enabled
+              ? 1
+              : 0
+            : existing.owner_enabled,
+          ownerDays.join(","),
+          body.clientEnabled !== undefined || body.client_enabled !== undefined
+            ? body.clientEnabled ?? body.client_enabled
+              ? 1
+              : 0
+            : existing.client_enabled,
+          clientDays.join(","),
+          body.stopOnClosed !== undefined || body.stop_on_closed !== undefined
+            ? body.stopOnClosed ?? body.stop_on_closed
+              ? 1
+              : 0
+            : existing.stop_on_closed,
+          ts,
+          user.id
+        )
+        .run();
+    }
+    const refreshed = await getUserById(env, user.id);
+    return {
+      settings: await ensureReminderSettings(env, { id: user.id }),
+      user: rowToUser(refreshed),
+    };
   }
 
   // Legacy global table if no user session id.
@@ -3141,31 +3129,35 @@ async function notifyOwnerNewLead(env, lead, { source = "contact" } = {}) {
   });
 }
 
-async function deliverReminder(env, { toEmail, subject, body, html, attachments }) {
+async function deliverReminder(env, { toEmail, subject, body, html, attachments, from, replyTo }) {
   if (!toEmail) {
     return { channel: "log", status: "skipped", error: "Missing recipient email." };
   }
   const apiKey = env.RESEND_API_KEY;
-  const from =
+  const fromAddress =
+    cleanText(from, 200) ||
     env.REMINDER_FROM_EMAIL ||
     env.NOTIFY_FROM_EMAIL ||
     "Vanderven Systems <brad@vanderven.ca>";
+  const replyAddress = cleanText(replyTo, 160).toLowerCase();
   if (!apiKey) {
     // No outbound mail until RESEND_API_KEY is set (lead still saved in CRM).
     return {
       channel: "log",
       status: "logged",
       error: "",
+      from: fromAddress,
       attachmentCount: Array.isArray(attachments) ? attachments.length : 0,
     };
   }
   try {
     const payload = {
-      from,
+      from: fromAddress,
       to: [toEmail],
       subject,
       text: body,
     };
+    if (replyAddress) payload.reply_to = replyAddress;
     if (html) payload.html = html;
     if (Array.isArray(attachments) && attachments.length) {
       payload.attachments = attachments.map((file) => ({
@@ -3184,16 +3176,22 @@ async function deliverReminder(env, { toEmail, subject, body, html, attachments 
     });
     if (!res.ok) {
       const detail = await res.text();
-      return { channel: "email", status: "failed", error: detail.slice(0, 500) };
+      return { channel: "email", status: "failed", error: detail.slice(0, 500), from: fromAddress };
     }
     return {
       channel: "email",
       status: "sent",
       error: "",
+      from: fromAddress,
       attachmentCount: Array.isArray(attachments) ? attachments.length : 0,
     };
   } catch (err) {
-    return { channel: "email", status: "failed", error: String(err?.message || err).slice(0, 500) };
+    return {
+      channel: "email",
+      status: "failed",
+      error: String(err?.message || err).slice(0, 500),
+      from: fromAddress,
+    };
   }
 }
 
@@ -3251,10 +3249,15 @@ async function processQuoteReminders(env) {
       if (existing) continue;
 
       const copy = buildReminderCopy(job.audience, quote, job.day, settings);
+      const ownerEmail = cleanText(quote.owner_email || settings.ownerEmail, 160).toLowerCase();
+      const ownerRow = ownerEmail ? await getUserByEmail(env, ownerEmail) : null;
+      const fromUser = ownerRow ? rowToUser(ownerRow) : null;
       const delivery = await deliverReminder(env, {
         toEmail: job.toEmail,
         subject: copy.subject,
         body: copy.body,
+        from: formatOutboundFrom(fromUser, env),
+        replyTo: fromUser?.email || ownerEmail || "",
       });
       const id = newId("rem");
       const ts = nowIso();
@@ -3578,68 +3581,7 @@ function buildInvoicePlainText(invoice) {
     .join("\n");
 }
 
-async function ensureQuotesInvoicesSeeded(env) {
-  if (!env.DB) return;
-  await ensureJobsSeeded(env);
-
-  const qCount = await env.DB.prepare("SELECT COUNT(*) AS c FROM quotes").first();
-  if (!qCount || Number(qCount.c) === 0) {
-    const ts = nowIso();
-    const sentAt = (daysAgo) => {
-      const d = new Date();
-      d.setUTCDate(d.getUTCDate() - daysAgo);
-      return d.toISOString();
-    };
-    const owner = cleanText(env.CRM_OWNER_EMAIL || "brad@vanderven.ca", 160);
-    const quotes = [
-      ["quote_demo_01", "lead_demo_01", "Q-1042", "Website + follow-up system", "Valley Mechanical Ltd.", "sent", 480000, "Includes intake form and quote chase sequence.", sentAt(5), owner],
-      ["quote_demo_02", "lead_demo_02", "Q-1043", "Listing inquiry overhaul", "Okanagan Homes Realty", "approved", 360000, "Weekend response SLA + cleaner property pages.", sentAt(12), owner],
-      ["quote_demo_03", "lead_demo_03", "Q-1044", "Owner update board", "Lakeside Property Group", "draft", 520000, "Maintenance status visible without chasing the office.", null, owner],
-      ["quote_demo_04", "lead_demo_04", "Q-1045", "Calendar + CRM sync", "Blake Advisory", "declined", 290000, "Paused — revisiting next quarter.", sentAt(20), owner],
-    ];
-    const stmt = env.DB.prepare(
-      `INSERT OR IGNORE INTO quotes
-        (id, lead_id, number, title, client_name, status, amount_cents, notes, sent_at, owner_email, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    );
-    await env.DB.batch(
-      quotes.map(([id, leadId, number, title, client, status, cents, notes, sent, ownerEmail]) =>
-        stmt.bind(id, leadId, number, title, client, status, cents, notes, sent, ownerEmail, ts, ts)
-      )
-    );
-  }
-
-  const iCount = await env.DB.prepare("SELECT COUNT(*) AS c FROM invoices").first();
-  if (!iCount || Number(iCount.c) === 0) {
-    const ts = nowIso();
-    const today = new Date();
-    const isoDay = (offset) => {
-      const d = new Date(today);
-      d.setHours(12, 0, 0, 0);
-      d.setDate(d.getDate() + offset);
-      return d.toISOString().slice(0, 10);
-    };
-    const invoices = [
-      ["inv_demo_01", "lead_demo_05", "job_demo_05", "INV-2201", "Seasonal intake setup", "Green Ridge Landscaping", "paid", 180000, isoDay(-10), "Paid on receipt."],
-      ["inv_demo_02", "lead_demo_02", "job_demo_02", "INV-2202", "Website review deposit", "Okanagan Homes Realty", "sent", 120000, isoDay(7), "Deposit against approved quote."],
-      ["inv_demo_03", "lead_demo_01", "job_demo_01", "INV-2203", "Site audit — Valley Mechanical", "Valley Mechanical Ltd.", "overdue", 95000, isoDay(-3), "Reminder sent once."],
-      ["inv_demo_04", "lead_demo_03", null, "INV-2204", "Discovery retainer", "Lakeside Property Group", "draft", 250000, isoDay(14), "Hold until owner board demo."],
-    ];
-    const stmt = env.DB.prepare(
-      `INSERT OR IGNORE INTO invoices
-        (id, lead_id, job_id, number, title, client_name, status, amount_cents, due_date, notes, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    );
-    await env.DB.batch(
-      invoices.map(([id, leadId, jobId, number, title, client, status, cents, due, notes]) =>
-        stmt.bind(id, leadId, jobId, number, title, client, status, cents, due, notes, ts, ts)
-      )
-    );
-  }
-}
-
 async function listQuotes(env, { status } = {}) {
-  await ensureQuotesInvoicesSeeded(env);
   await ensureQuoteDocumentsSeeded(env);
   let sql = "SELECT * FROM quotes";
   const binds = [];
@@ -3664,7 +3606,182 @@ async function listQuotes(env, { status } = {}) {
 async function getQuote(env, id) {
   const row = await env.DB.prepare("SELECT * FROM quotes WHERE id = ?").bind(id).first();
   if (!row) return null;
-  return enrichQuote(env, rowToQuote(row));
+  return enrichQuote(env, rowToQuote(row, { includeSignature: true }));
+}
+
+async function issueQuoteSignToken(env, quoteId) {
+  const token = newSignToken();
+  const ts = nowIso();
+  try {
+    await env.DB.prepare(
+      `UPDATE quotes SET
+        sign_token = ?, sign_token_created_at = ?,
+        signed_at = NULL, signed_name = '', signature_png = NULL,
+        signed_ip = NULL, signed_user_agent = NULL,
+        updated_at = ?
+       WHERE id = ?`
+    )
+      .bind(token, ts, ts, quoteId)
+      .run();
+  } catch {
+    // Columns missing until migration 0019.
+    return null;
+  }
+  return token;
+}
+
+function isValidSignaturePng(dataUrl) {
+  const raw = String(dataUrl || "").trim();
+  if (!raw.startsWith("data:image/png;base64,")) return false;
+  if (raw.length < 800 || raw.length > 180000) return false;
+  return true;
+}
+
+async function getQuoteBySignToken(env, token) {
+  const clean = cleanText(token, 80);
+  if (!clean) return null;
+  try {
+    const row = await env.DB.prepare("SELECT * FROM quotes WHERE sign_token = ?").bind(clean).first();
+    return row || null;
+  } catch {
+    return null;
+  }
+}
+
+function publicQuotePayload(row) {
+  const quote = rowToQuote(row, { includeSignature: true });
+  return {
+    number: quote.number,
+    title: quote.title,
+    clientName: quote.clientName,
+    amountCents: quote.amountCents,
+    amountLabel: formatCadCents(quote.amountCents),
+    notes: quote.notes,
+    status: quote.status,
+    signedAt: quote.signedAt,
+    signedName: quote.signedName,
+    hasSignature: quote.hasSignature,
+    signaturePng: quote.hasSignature ? quote.signaturePng : "",
+    company: {
+      name: COMPANY.name,
+      email: COMPANY.email,
+      web: COMPANY.web,
+      location: COMPANY.location,
+      tagline: COMPANY.tagline,
+    },
+  };
+}
+
+async function notifyQuoteOwnerDecision(env, row, { action, signedName }) {
+  const toEmail = cleanText(row.owner_email || env.CRM_OWNER_EMAIL || "", 160).toLowerCase();
+  if (!toEmail) return;
+  const label = action === "approve" ? "approved and signed" : "declined";
+  const subject = `Quote ${row.number} ${label}`;
+  const body = [
+    `Quote ${row.number} — ${row.title}`,
+    `Client: ${row.client_name || "Client"}`,
+    `Status: ${label}`,
+    action === "approve" && signedName ? `Signed by: ${signedName}` : "",
+    "",
+    `Open the CRM Quotes view for details.`,
+    `— ${COMPANY.name}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+  await deliverReminder(env, { toEmail, subject, body });
+}
+
+async function signQuotePublic(env, body, request) {
+  const token = cleanText(body.token, 80);
+  const action = String(body.action || "").toLowerCase().trim();
+  if (!token) return { error: "Missing signing link.", status: 400 };
+  if (action !== "approve" && action !== "decline") {
+    return { error: "Choose approve or decline.", status: 400 };
+  }
+
+  const row = await getQuoteBySignToken(env, token);
+  if (!row) return { error: "This signing link is invalid or expired.", status: 404 };
+
+  if (row.status === "approved" || row.status === "declined") {
+    return { ok: true, alreadyDone: true, quote: publicQuotePayload(row) };
+  }
+  if (row.status !== "sent" && row.status !== "revisions_requested") {
+    return { error: "This quote is not open for signature.", status: 400 };
+  }
+
+  const ts = nowIso();
+  const ip = cleanText(request.headers.get("CF-Connecting-IP") || request.headers.get("X-Forwarded-For") || "", 80);
+  const ua = cleanText(request.headers.get("User-Agent") || "", 300);
+
+  if (action === "decline") {
+    await env.DB.prepare(
+      `UPDATE quotes SET status = 'declined', updated_at = ? WHERE id = ?`
+    )
+      .bind(ts, row.id)
+      .run();
+    if (row.lead_id) {
+      await recordActivity(env, row.lead_id, {
+        kind: "quote_status",
+        entityType: "quote",
+        entityId: row.id,
+        summary: `Quote ${row.number} declined by client`,
+        meta: { via: "signature_link" },
+        at: ts,
+      });
+    }
+    const updated = await env.DB.prepare("SELECT * FROM quotes WHERE id = ?").bind(row.id).first();
+    try {
+      await notifyQuoteOwnerDecision(env, updated || row, { action: "decline" });
+    } catch {
+      /* ignore notify failures */
+    }
+    return { ok: true, quote: publicQuotePayload(updated || row) };
+  }
+
+  const signedName = cleanText(body.signedName ?? body.signed_name, 120);
+  const signaturePng = String(body.signaturePng ?? body.signature_png ?? "").trim();
+  if (!signedName || signedName.length < 2) {
+    return { error: "Type your full name to sign.", status: 400 };
+  }
+  if (!isValidSignaturePng(signaturePng)) {
+    return { error: "Draw your signature before approving.", status: 400 };
+  }
+
+  await env.DB.prepare(
+    `UPDATE quotes SET
+      status = 'approved',
+      signed_at = ?, signed_name = ?, signature_png = ?,
+      signed_ip = ?, signed_user_agent = ?, updated_at = ?
+     WHERE id = ?`
+  )
+    .bind(ts, signedName, signaturePng, ip, ua, ts, row.id)
+    .run();
+
+  if (row.lead_id) {
+    await recordActivity(env, row.lead_id, {
+      kind: "quote_status",
+      entityType: "quote",
+      entityId: row.id,
+      summary: `Quote ${row.number} approved & signed by ${signedName}`,
+      meta: { via: "signature_link", signedName },
+      at: ts,
+    });
+    try {
+      await env.DB.prepare("UPDATE leads SET stage = ?, updated_at = ? WHERE id = ? AND stage != ?")
+        .bind("active", ts, row.lead_id, "won")
+        .run();
+    } catch {
+      /* stage update best-effort */
+    }
+  }
+
+  const updated = await env.DB.prepare("SELECT * FROM quotes WHERE id = ?").bind(row.id).first();
+  try {
+    await notifyQuoteOwnerDecision(env, updated || row, { action: "approve", signedName });
+  } catch {
+    /* ignore */
+  }
+  return { ok: true, quote: publicQuotePayload(updated || row) };
 }
 
 async function createQuote(env, body) {
@@ -3808,7 +3925,7 @@ async function updateQuote(env, id, body) {
   return { quote };
 }
 
-async function sendQuote(env, id, requestUrl) {
+async function sendQuote(env, id, requestUrl, senderUser = null) {
   const quote = await getQuote(env, id);
   if (!quote) return { error: "Quote not found.", status: 404 };
   if (!quote.leadId) {
@@ -3819,18 +3936,30 @@ async function sendQuote(env, id, requestUrl) {
   if (!toEmail) {
     return { error: "Add an email on the client before sending the quote.", status: 400 };
   }
+
+  const signToken = await issueQuoteSignToken(env, id);
+  if (!signToken) {
+    return {
+      error: "Quote signing is not ready yet. Apply database migrations and try again.",
+      status: 503,
+    };
+  }
+
   const documents = await documentsForQuote(env, quote);
   const origin = requestUrl ? new URL(requestUrl).origin : "";
   const logoUrl = origin ? `${origin}/public/logo-mark-nav.png` : "";
-  const html = buildQuoteLetterheadHtml(quote, documents, { absoluteLogoUrl: logoUrl });
-  const text = buildQuotePlainText(quote, documents);
+  const signUrl = origin ? `${origin}/sign/q/${encodeURIComponent(signToken)}` : "";
+  const html = buildQuoteLetterheadHtml(quote, documents, { absoluteLogoUrl: logoUrl, signUrl });
+  const text = buildQuotePlainText(quote, documents, { signUrl });
   const attachments = documents.map(documentAttachmentPayload);
   const delivery = await deliverReminder(env, {
     toEmail,
-    subject: `Quote ${quote.number} from ${COMPANY.name}`,
+    subject: `Quote ${quote.number} from ${COMPANY.name} — review & sign`,
     body: text,
     html,
     attachments,
+    from: formatOutboundFrom(senderUser, env),
+    replyTo: senderUser?.email || "",
   });
   if (delivery.status === "failed") {
     return { error: delivery.error || "Could not send quote email.", status: 502, delivery };
@@ -3842,18 +3971,19 @@ async function sendQuote(env, id, requestUrl) {
       kind: "quote",
       entityType: "quote",
       entityId: result.quote.id,
-      summary: `Quote ${result.quote.number} sent to ${toEmail}${
+      summary: `Quote ${result.quote.number} sent to ${toEmail} · awaiting signature${
         attachments.length ? ` · ${attachments.length} attachment(s)` : ""
       }`,
       meta: {
         channel: delivery.channel,
         status: delivery.status,
         documentIds: result.quote.documentIds || [],
+        signUrl: Boolean(signUrl),
       },
       at: nowIso(),
     });
   }
-  return { quote: result.quote, delivery, documents };
+  return { quote: result.quote, delivery, documents, signUrl };
 }
 
 async function deleteQuote(env, id) {
@@ -3863,7 +3993,6 @@ async function deleteQuote(env, id) {
 }
 
 async function listInvoices(env, { status } = {}) {
-  await ensureQuotesInvoicesSeeded(env);
   let sql = "SELECT * FROM invoices";
   const binds = [];
   if (status && normalizeInvoiceStatus(status)) {
@@ -4090,7 +4219,7 @@ async function updateInvoice(env, id, body) {
   return { invoice };
 }
 
-async function sendInvoice(env, id, requestUrl) {
+async function sendInvoice(env, id, requestUrl, senderUser = null) {
   const invoice = await getInvoice(env, id);
   if (!invoice) return { error: "Invoice not found.", status: 404 };
   const toEmail = cleanText(invoice.billToEmail, 160).toLowerCase();
@@ -4106,6 +4235,8 @@ async function sendInvoice(env, id, requestUrl) {
     subject: `Invoice ${invoice.number} from ${COMPANY.name}`,
     body: text,
     html,
+    from: formatOutboundFrom(senderUser, env),
+    replyTo: senderUser?.email || "",
   });
   if (delivery.status === "failed") {
     return { error: delivery.error || "Could not send invoice email.", status: 502, delivery };
@@ -4163,6 +4294,28 @@ async function handleApi(request, env) {
       /* lead is saved even if notify fails */
     }
     return json({ ok: true, id: result.lead.id }, { status: 201 });
+  }
+
+  // Public quote signing preview
+  if (path === "/api/public/quotes/sign-preview" && method === "GET") {
+    const token = url.searchParams.get("token") || "";
+    const row = await getQuoteBySignToken(env, token);
+    if (!row) return json({ error: "This signing link is invalid or expired." }, { status: 404 });
+    return json({ quote: publicQuotePayload(row) });
+  }
+
+  if (path === "/api/public/quotes/sign" && method === "POST") {
+    let body;
+    try {
+      body = await request.json();
+    } catch {
+      return badRequest("Invalid JSON body.");
+    }
+    const result = await signQuotePublic(env, body, request);
+    if (result.error) {
+      return json({ error: result.error }, { status: result.status || 400 });
+    }
+    return json(result);
   }
 
   // Public home-page concierge (Vera)
@@ -4541,7 +4694,7 @@ async function handleAuthedApi(request, env, sessionUser, url, path, method) {
   const quoteSendMatch = path.match(/^\/api\/quotes\/([^/]+)\/send$/);
   if (quoteSendMatch && method === "POST") {
     const id = decodeURIComponent(quoteSendMatch[1]);
-    const result = await sendQuote(env, id, request.url);
+    const result = await sendQuote(env, id, request.url, sessionUser);
     if (result.error) {
       return json(
         { error: result.error, delivery: result.delivery || null },
@@ -4621,7 +4774,9 @@ async function handleAuthedApi(request, env, sessionUser, url, path, method) {
 
   if (path === "/api/reminder-settings" && method === "GET") {
     const settings = await ensureReminderSettings(env, sessionUser);
-    return json({ settings, user: sessionUser });
+    const fresh =
+      sessionUser?.id != null ? rowToUser(await getUserById(env, sessionUser.id)) : sessionUser;
+    return json({ settings, user: fresh || sessionUser });
   }
 
   if (path === "/api/reminder-settings" && method === "PUT") {
@@ -4633,7 +4788,7 @@ async function handleAuthedApi(request, env, sessionUser, url, path, method) {
     }
     const result = await updateReminderSettings(env, body, sessionUser);
     if (result.error) return json({ error: result.error }, { status: result.status || 400 });
-    return json({ settings: result.settings, user: sessionUser });
+    return json({ settings: result.settings, user: result.user || sessionUser });
   }
 
   if (path === "/api/reminders" && method === "GET") {
@@ -4669,7 +4824,7 @@ async function handleAuthedApi(request, env, sessionUser, url, path, method) {
   const invoiceSendMatch = path.match(/^\/api\/invoices\/([^/]+)\/send$/);
   if (invoiceSendMatch && method === "POST") {
     const id = decodeURIComponent(invoiceSendMatch[1]);
-    const result = await sendInvoice(env, id, request.url);
+    const result = await sendInvoice(env, id, request.url, sessionUser);
     if (result.error) {
       return json(
         { error: result.error, delivery: result.delivery || null },
@@ -4739,6 +4894,15 @@ export default {
         // Request the clean URL so ASSETS serves login.html with 200 (not 307).
         const loginUrl = new URL("/login", request.url);
         return env.ASSETS.fetch(new Request(loginUrl.toString(), request));
+      }
+
+      // Public quote signing page: /sign/q/:token
+      const signMatch = pathname.match(/^\/sign\/q\/([^/]+)\/?$/);
+      if (signMatch) {
+        return serveAsset(request, env, "/sign/quote");
+      }
+      if (pathname === "/sign/quote" || pathname === "/sign/quote.html") {
+        return serveAsset(request, env, "/sign/quote");
       }
 
       if (pathname === "/app" || pathname === "/app/" || pathname.startsWith("/app/")) {
