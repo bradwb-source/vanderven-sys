@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sign in | Vanderven Systems</title>
+    <meta name="robots" content="noindex,nofollow" />
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="icon" href="/public/favicon.ico" sizes="any" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Outfit:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/app/app.css" />
+  </head>
+  <body class="login-page">
+    <div class="login-stage" aria-hidden="true">
+      <img
+        class="login-stage__img"
+        src="/public/photos/office.jpg"
+        alt=""
+        width="1920"
+        height="1080"
+        fetchpriority="high"
+      />
+      <div class="login-stage__veil"></div>
+      <div class="login-stage__glow"></div>
+    </div>
+
+    <main class="login-shell">
+      <header class="login-hero">
+        <img class="login-mark" src="/public/logo-mark-nav.png" alt="" width="56" height="34" />
+        <p class="login-brand">Vanderven</p>
+        <h1 class="login-title">Systems</h1>
+        <p class="login-lead">Private workspace for leads, builds, and the week ahead.</p>
+      </header>
+
+      <form id="login-form" class="login-form" novalidate>
+        <label>
+          <span>Email</span>
+          <input
+            type="email"
+            name="email"
+            autocomplete="username"
+            required
+            autofocus
+            placeholder="you@vanderven.ca"
+          />
+        </label>
+        <label>
+          <span>Password</span>
+          <input
+            type="password"
+            name="password"
+            autocomplete="current-password"
+            required
+            placeholder="Enter password"
+          />
+        </label>
+        <p id="login-error" class="form-error" hidden></p>
+        <button type="submit" class="btn btn-primary login-submit">Continue</button>
+        <p class="login-reset-link">
+          <button type="button" class="login-text-btn" id="show-forgot">Forgot password?</button>
+        </p>
+      </form>
+
+      <form id="forgot-form" class="login-form" hidden novalidate>
+        <p class="login-panel-copy">Enter your CRM email and we’ll send a reset link.</p>
+        <label>
+          <span>Email</span>
+          <input
+            type="email"
+            name="email"
+            autocomplete="username"
+            required
+            placeholder="you@vanderven.ca"
+          />
+        </label>
+        <p id="forgot-error" class="form-error" hidden></p>
+        <p id="forgot-ok" class="form-ok" hidden></p>
+        <button type="submit" class="btn btn-primary login-submit">Send reset link</button>
+        <p class="login-reset-link">
+          <button type="button" class="login-text-btn" id="show-login-from-forgot">Back to sign in</button>
+        </p>
+      </form>
+
+      <form id="reset-form" class="login-form" hidden novalidate>
+        <p class="login-panel-copy">Choose a new password for your account.</p>
+        <label>
+          <span>New password</span>
+          <input
+            type="password"
+            name="password"
+            autocomplete="new-password"
+            required
+            minlength="6"
+            placeholder="At least 6 characters"
+          />
+        </label>
+        <label>
+          <span>Confirm password</span>
+          <input
+            type="password"
+            name="confirm"
+            autocomplete="new-password"
+            required
+            minlength="6"
+            placeholder="Repeat new password"
+          />
+        </label>
+        <p id="reset-error" class="form-error" hidden></p>
+        <p id="reset-ok" class="form-ok" hidden></p>
+        <button type="submit" class="btn btn-primary login-submit">Update password</button>
+        <p class="login-reset-link">
+          <button type="button" class="login-text-btn" id="show-login-from-reset">Back to sign in</button>
+        </p>
+      </form>
+
+      <p class="login-foot"><a href="/">Back to site</a></p>
+    </main>
+
+    <script>
+      (() => {
+        const loginForm = document.getElementById("login-form");
+        const forgotForm = document.getElementById("forgot-form");
+        const resetForm = document.getElementById("reset-form");
+        const loginError = document.getElementById("login-error");
+        const forgotError = document.getElementById("forgot-error");
+        const forgotOk = document.getElementById("forgot-ok");
+        const resetError = document.getElementById("reset-error");
+        const resetOk = document.getElementById("reset-ok");
+        const params = new URLSearchParams(location.search);
+        const next = params.get("next") || "/app/";
+        const resetToken = params.get("reset") || "";
+
+        const showPanel = (panel) => {
+          loginForm.hidden = panel !== "login";
+          forgotForm.hidden = panel !== "forgot";
+          resetForm.hidden = panel !== "reset";
+        };
+
+        if (params.get("reason") === "idle") {
+          loginError.textContent = "Signed out after 30 minutes of inactivity. Sign in again.";
+          loginError.hidden = false;
+        }
+
+        if (resetToken) showPanel("reset");
+
+        document.getElementById("show-forgot")?.addEventListener("click", () => {
+          loginError.hidden = true;
+          forgotError.hidden = true;
+          forgotOk.hidden = true;
+          const email = loginForm.email?.value || "";
+          if (email) forgotForm.email.value = email;
+          showPanel("forgot");
+          forgotForm.email?.focus();
+        });
+        document.getElementById("show-login-from-forgot")?.addEventListener("click", () => {
+          showPanel("login");
+          loginForm.email?.focus();
+        });
+        document.getElementById("show-login-from-reset")?.addEventListener("click", () => {
+          history.replaceState({}, "", "/login");
+          showPanel("login");
+          loginForm.email?.focus();
+        });
+
+        loginForm.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          loginError.hidden = true;
+          const dataForm = new FormData(loginForm);
+          const email = dataForm.get("email");
+          const password = dataForm.get("password");
+          const btn = loginForm.querySelector('button[type="submit"]');
+          btn.disabled = true;
+          btn.textContent = "Signing in…";
+          try {
+            const res = await fetch("/api/login", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              credentials: "same-origin",
+              body: JSON.stringify({ email, password }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+              loginError.textContent = data.error || "Could not sign in.";
+              loginError.hidden = false;
+              btn.disabled = false;
+              btn.textContent = "Continue";
+              return;
+            }
+            location.href = next.startsWith("/") ? next : "/app/";
+          } catch {
+            loginError.textContent = "Network error. Try again.";
+            loginError.hidden = false;
+            btn.disabled = false;
+            btn.textContent = "Continue";
+          }
+        });
+
+        forgotForm.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          forgotError.hidden = true;
+          forgotOk.hidden = true;
+          const email = new FormData(forgotForm).get("email");
+          const btn = forgotForm.querySelector('button[type="submit"]');
+          btn.disabled = true;
+          btn.textContent = "Sending…";
+          try {
+            const res = await fetch("/api/public/password-reset/request", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ email }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+              forgotError.textContent = data.error || "Could not send reset link.";
+              forgotError.hidden = false;
+            } else {
+              forgotOk.textContent =
+                data.message || "If that email is on file, we sent a reset link. Check your inbox.";
+              forgotOk.hidden = false;
+            }
+          } catch {
+            forgotError.textContent = "Network error. Try again.";
+            forgotError.hidden = false;
+          }
+          btn.disabled = false;
+          btn.textContent = "Send reset link";
+        });
+
+        resetForm.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          resetError.hidden = true;
+          resetOk.hidden = true;
+          const dataForm = new FormData(resetForm);
+          const password = String(dataForm.get("password") || "");
+          const confirm = String(dataForm.get("confirm") || "");
+          if (password !== confirm) {
+            resetError.textContent = "Passwords do not match.";
+            resetError.hidden = false;
+            return;
+          }
+          const btn = resetForm.querySelector('button[type="submit"]');
+          btn.disabled = true;
+          btn.textContent = "Updating…";
+          try {
+            const res = await fetch("/api/public/password-reset/confirm", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                token: resetToken,
+                password,
+                confirmPassword: confirm,
+              }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+              resetError.textContent = data.error || "Could not update password.";
+              resetError.hidden = false;
+              btn.disabled = false;
+              btn.textContent = "Update password";
+              return;
+            }
+            resetOk.textContent = "Password updated. You can sign in now.";
+            resetOk.hidden = false;
+            if (data.email) loginForm.email.value = data.email;
+            setTimeout(() => {
+              history.replaceState({}, "", "/login");
+              showPanel("login");
+              loginForm.password?.focus();
+            }, 900);
+          } catch {
+            resetError.textContent = "Network error. Try again.";
+            resetError.hidden = false;
+          }
+          btn.disabled = false;
+          btn.textContent = "Update password";
+        });
+      })();
+    </script>
+  </body>
+</html>

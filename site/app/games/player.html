@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Game player</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        background: #000;
+        overflow: hidden;
+      }
+      #game {
+        width: 100%;
+        height: 100%;
+      }
+      .boot {
+        color: #d7dde8;
+        font: 500 14px/1.4 system-ui, sans-serif;
+        display: grid;
+        place-items: center;
+        height: 100%;
+        text-align: center;
+        padding: 1rem;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="game"><div class="boot">Waiting for ROM…</div></div>
+    <script>
+      (() => {
+        let started = false;
+        function start(msg) {
+          if (started) return;
+          started = true;
+          const name = msg.name || "game.gb";
+          const core = msg.core === "gba" ? "gba" : "gb";
+          const bytes = msg.bytes instanceof ArrayBuffer ? msg.bytes : new Uint8Array(msg.bytes).buffer;
+          const url = URL.createObjectURL(new Blob([bytes], { type: "application/octet-stream" }));
+
+          document.getElementById("game").innerHTML = "";
+
+          window.EJS_player = "#game";
+          window.EJS_core = core;
+          window.EJS_gameUrl = url;
+          window.EJS_gameName = name;
+          window.EJS_gameID = 1001;
+          window.EJS_color = "#1f7a6c";
+          window.EJS_volume = 0.55;
+          window.EJS_threads = false;
+          window.EJS_startOnLoaded = true;
+          window.EJS_fixedSaveInterval = 10000;
+          window.EJS_pathtodata = "https://cdn.emulatorjs.org/stable/data/";
+          window.EJS_Buttons = {
+            playPause: true,
+            restart: true,
+            mute: true,
+            volume: true,
+            fullscreen: true,
+            quickSave: true,
+            quickLoad: true,
+            saveSavFiles: true,
+            loadSaveFiles: true,
+          };
+          window.EJS_defaultOptions = {
+            "save-state-location": "browser",
+          };
+          window.EJS_ready = function () {
+            try {
+              window.EJS_emulator && window.EJS_emulator.play && window.EJS_emulator.play();
+            } catch (e) {}
+            parent.postMessage({ type: "emu-started" }, "*");
+          };
+
+          const s = document.createElement("script");
+          s.src = "https://cdn.emulatorjs.org/stable/data/loader.js?v=" + Date.now();
+          s.onerror = function () {
+            document.getElementById("game").innerHTML =
+              '<div class="boot">Could not load emulator scripts.</div>';
+            parent.postMessage({ type: "emu-error", message: "loader failed" }, "*");
+          };
+          document.body.appendChild(s);
+        }
+
+        window.addEventListener("message", (event) => {
+          if (!event.data || event.data.type !== "start-rom") return;
+          start(event.data);
+        });
+
+        parent.postMessage({ type: "emu-frame-ready" }, "*");
+      })();
+    </script>
+  </body>
+</html>

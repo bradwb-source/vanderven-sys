@@ -1,7 +1,8 @@
 .cursor/
-public/photos/_fresh/
+site/public/photos/_fresh/
 .DS_Store
 assets/
 .wrangler/
 .dev.vars
+.deploy-secrets.tmp
 node_modules/
