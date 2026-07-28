@@ -618,22 +618,55 @@
   function noteKindLabel(kind) {
     if (kind === "revisions_requested" || kind === "change_request") return "Change request";
     if (kind === "request") return "Request";
+    if (kind === "call") return "Call";
     return "Note";
+  }
+
+  function noteAudioSrc(note) {
+    const body = String(note?.body || "");
+    const recording = body.match(/Recording:\s*(\/api\/calls\/[^\s]+\/audio)/i);
+    if (recording) return recording[1];
+    const conv = body.match(/ElevenLabs conversation:\s*([A-Za-z0-9_-]+)/i);
+    if (conv) return `/api/calls/${conv[1]}/audio`;
+    return "";
+  }
+
+  function noteBodyHtml(note) {
+    const raw = String(note?.body || "");
+    const audioSrc = noteAudioSrc(note);
+    const cleaned = raw
+      .replace(/\n*\s*Recording:\s*\/api\/calls\/[^\s]+\/audio\s*/gi, "\n")
+      .trim();
+    const paragraphs = cleaned
+      ? cleaned
+          .split(/\n{2,}/)
+          .map((block) => `<p>${escapeHtml(block).replace(/\n/g, "<br>")}</p>`)
+          .join("")
+      : "";
+    const player =
+      note.kind === "call" || audioSrc
+        ? `<div class="client-note__audio">
+            <audio controls preload="none" src="${escapeHtml(audioSrc || "")}"></audio>
+            ${audioSrc ? "" : `<p class="muted">Recording not available yet.</p>`}
+          </div>`
+        : "";
+    return `${paragraphs}${player}`;
   }
 
   function noteCardHtml(note, { showAuthor = true } = {}) {
     const editable = canEditNote(note);
     const isRevision = note.kind === "revisions_requested" || note.kind === "change_request";
+    const isCall = note.kind === "call";
     const edited =
       note.updatedAt && note.createdAt && note.updatedAt !== note.createdAt
         ? ` · edited ${formatDateTime(note.updatedAt)}`
         : "";
     return `
-      <article class="client-note ${isRevision ? "is-revision" : ""}" data-note-id="${escapeHtml(note.id)}" data-note-lead="${escapeHtml(
+      <article class="client-note ${isRevision ? "is-revision" : ""} ${isCall ? "is-call" : ""}" data-note-id="${escapeHtml(note.id)}" data-note-lead="${escapeHtml(
         note.leadId || ""
       )}">
         <div class="client-note__meta">
-          <span class="chip chip-${isRevision ? "rust" : "slate"}">${escapeHtml(noteKindLabel(note.kind))}</span>
+          <span class="chip chip-${isRevision ? "rust" : isCall ? "teal" : "slate"}">${escapeHtml(noteKindLabel(note.kind))}</span>
           <div class="client-note__meta-right">
             <time>${escapeHtml(formatDateTime(note.createdAt))}${escapeHtml(edited)}</time>
             ${
@@ -646,7 +679,7 @@
           </div>
         </div>
         <div class="client-note__body" data-note-body>
-          <p>${escapeHtml(note.body)}</p>
+          ${noteBodyHtml(note)}
         </div>
         ${showAuthor && note.author ? `<p class="muted client-note__author">${escapeHtml(note.author)}</p>` : ""}
       </article>`;
@@ -3669,6 +3702,7 @@
       job: "teal",
       job_status: "teal",
       invoice: "gold",
+      call: "teal",
       reminder: "slate",
     };
     return map[kind] || "slate";

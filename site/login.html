@@ -61,6 +61,61 @@
         </label>
         <p id="login-error" class="form-error" hidden></p>
         <button type="submit" class="btn btn-primary login-submit">Continue</button>
+        <p class="login-reset-link">
+          <button type="button" class="login-text-btn" id="show-forgot">Forgot password?</button>
+        </p>
+      </form>
+
+      <form id="forgot-form" class="login-form" hidden novalidate>
+        <p class="login-panel-copy">Enter your CRM email and we’ll send a reset link.</p>
+        <label>
+          <span>Email</span>
+          <input
+            type="email"
+            name="email"
+            autocomplete="username"
+            required
+            placeholder="you@vanderven.ca"
+          />
+        </label>
+        <p id="forgot-error" class="form-error" hidden></p>
+        <p id="forgot-ok" class="form-ok" hidden></p>
+        <button type="submit" class="btn btn-primary login-submit">Send reset link</button>
+        <p class="login-reset-link">
+          <button type="button" class="login-text-btn" id="show-login-from-forgot">Back to sign in</button>
+        </p>
+      </form>
+
+      <form id="reset-form" class="login-form" hidden novalidate>
+        <p class="login-panel-copy">Choose a new password for your account.</p>
+        <label>
+          <span>New password</span>
+          <input
+            type="password"
+            name="password"
+            autocomplete="new-password"
+            required
+            minlength="6"
+            placeholder="At least 6 characters"
+          />
+        </label>
+        <label>
+          <span>Confirm password</span>
+          <input
+            type="password"
+            name="confirm"
+            autocomplete="new-password"
+            required
+            minlength="6"
+            placeholder="Repeat new password"
+          />
+        </label>
+        <p id="reset-error" class="form-error" hidden></p>
+        <p id="reset-ok" class="form-ok" hidden></p>
+        <button type="submit" class="btn btn-primary login-submit">Update password</button>
+        <p class="login-reset-link">
+          <button type="button" class="login-text-btn" id="show-login-from-reset">Back to sign in</button>
+        </p>
       </form>
 
       <p class="login-foot"><a href="/">Back to site</a></p>
@@ -68,22 +123,57 @@
 
     <script>
       (() => {
-        const form = document.getElementById("login-form");
-        const errorEl = document.getElementById("login-error");
+        const loginForm = document.getElementById("login-form");
+        const forgotForm = document.getElementById("forgot-form");
+        const resetForm = document.getElementById("reset-form");
+        const loginError = document.getElementById("login-error");
+        const forgotError = document.getElementById("forgot-error");
+        const forgotOk = document.getElementById("forgot-ok");
+        const resetError = document.getElementById("reset-error");
+        const resetOk = document.getElementById("reset-ok");
         const params = new URLSearchParams(location.search);
         const next = params.get("next") || "/app/";
+        const resetToken = params.get("reset") || "";
+
+        const showPanel = (panel) => {
+          loginForm.hidden = panel !== "login";
+          forgotForm.hidden = panel !== "forgot";
+          resetForm.hidden = panel !== "reset";
+        };
+
         if (params.get("reason") === "idle") {
-          errorEl.textContent = "Signed out after 30 minutes of inactivity. Sign in again.";
-          errorEl.hidden = false;
+          loginError.textContent = "Signed out after 30 minutes of inactivity. Sign in again.";
+          loginError.hidden = false;
         }
 
-        form.addEventListener("submit", async (event) => {
+        if (resetToken) showPanel("reset");
+
+        document.getElementById("show-forgot")?.addEventListener("click", () => {
+          loginError.hidden = true;
+          forgotError.hidden = true;
+          forgotOk.hidden = true;
+          const email = loginForm.email?.value || "";
+          if (email) forgotForm.email.value = email;
+          showPanel("forgot");
+          forgotForm.email?.focus();
+        });
+        document.getElementById("show-login-from-forgot")?.addEventListener("click", () => {
+          showPanel("login");
+          loginForm.email?.focus();
+        });
+        document.getElementById("show-login-from-reset")?.addEventListener("click", () => {
+          history.replaceState({}, "", "/login");
+          showPanel("login");
+          loginForm.email?.focus();
+        });
+
+        loginForm.addEventListener("submit", async (event) => {
           event.preventDefault();
-          errorEl.hidden = true;
-          const dataForm = new FormData(form);
+          loginError.hidden = true;
+          const dataForm = new FormData(loginForm);
           const email = dataForm.get("email");
           const password = dataForm.get("password");
-          const btn = form.querySelector("button");
+          const btn = loginForm.querySelector('button[type="submit"]');
           btn.disabled = true;
           btn.textContent = "Signing in…";
           try {
@@ -95,19 +185,99 @@
             });
             const data = await res.json().catch(() => ({}));
             if (!res.ok) {
-              errorEl.textContent = data.error || "Could not sign in.";
-              errorEl.hidden = false;
+              loginError.textContent = data.error || "Could not sign in.";
+              loginError.hidden = false;
               btn.disabled = false;
               btn.textContent = "Continue";
               return;
             }
             location.href = next.startsWith("/") ? next : "/app/";
           } catch {
-            errorEl.textContent = "Network error. Try again.";
-            errorEl.hidden = false;
+            loginError.textContent = "Network error. Try again.";
+            loginError.hidden = false;
             btn.disabled = false;
             btn.textContent = "Continue";
           }
+        });
+
+        forgotForm.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          forgotError.hidden = true;
+          forgotOk.hidden = true;
+          const email = new FormData(forgotForm).get("email");
+          const btn = forgotForm.querySelector('button[type="submit"]');
+          btn.disabled = true;
+          btn.textContent = "Sending…";
+          try {
+            const res = await fetch("/api/public/password-reset/request", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ email }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+              forgotError.textContent = data.error || "Could not send reset link.";
+              forgotError.hidden = false;
+            } else {
+              forgotOk.textContent =
+                data.message || "If that email is on file, we sent a reset link. Check your inbox.";
+              forgotOk.hidden = false;
+            }
+          } catch {
+            forgotError.textContent = "Network error. Try again.";
+            forgotError.hidden = false;
+          }
+          btn.disabled = false;
+          btn.textContent = "Send reset link";
+        });
+
+        resetForm.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          resetError.hidden = true;
+          resetOk.hidden = true;
+          const dataForm = new FormData(resetForm);
+          const password = String(dataForm.get("password") || "");
+          const confirm = String(dataForm.get("confirm") || "");
+          if (password !== confirm) {
+            resetError.textContent = "Passwords do not match.";
+            resetError.hidden = false;
+            return;
+          }
+          const btn = resetForm.querySelector('button[type="submit"]');
+          btn.disabled = true;
+          btn.textContent = "Updating…";
+          try {
+            const res = await fetch("/api/public/password-reset/confirm", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                token: resetToken,
+                password,
+                confirmPassword: confirm,
+              }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+              resetError.textContent = data.error || "Could not update password.";
+              resetError.hidden = false;
+              btn.disabled = false;
+              btn.textContent = "Update password";
+              return;
+            }
+            resetOk.textContent = "Password updated. You can sign in now.";
+            resetOk.hidden = false;
+            if (data.email) loginForm.email.value = data.email;
+            setTimeout(() => {
+              history.replaceState({}, "", "/login");
+              showPanel("login");
+              loginForm.password?.focus();
+            }, 900);
+          } catch {
+            resetError.textContent = "Network error. Try again.";
+            resetError.hidden = false;
+          }
+          btn.disabled = false;
+          btn.textContent = "Update password";
         });
       })();
     </script>

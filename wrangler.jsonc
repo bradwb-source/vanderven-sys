@@ -28,6 +28,12 @@
       "migrations_dir": "migrations"
     }
   ],
+  "r2_buckets": [
+    {
+      "binding": "CALL_AUDIO",
+      "bucket_name": "vanderven-call-recordings"
+    }
+  ],
   "ai": {
     "binding": "AI",
     "remote": true

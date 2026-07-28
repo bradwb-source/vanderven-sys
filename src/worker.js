@@ -451,6 +451,135 @@ async function changeOwnPassword(env, sessionUser, body = {}) {
   return { ok: true };
 }
 
+async function sha256Hex(value) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(String(value || "")));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function originFromRequest(request) {
+  try {
+    const url = new URL(request.url);
+    return `${url.protocol}//${url.host}`;
+  } catch {
+    return "https://vanderven.ca";
+  }
+}
+
+function escapeHtmlMail(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+async function requestPasswordReset(env, emailRaw, request) {
+  const email = cleanText(emailRaw, 160).toLowerCase();
+  if (!email || !email.includes("@")) return { error: "Enter a valid email address." };
+
+  // Always return the same message so we don't leak whether the account exists.
+  const generic = {
+    ok: true,
+    message: "If that email is on file, we sent a reset link. Check your inbox.",
+  };
+
+  try {
+    await ensureUsers(env);
+    const user = await getUserByEmail(env, email);
+    if (!user || !Number(user.active)) return generic;
+
+    const tokenBytes = crypto.getRandomValues(new Uint8Array(32));
+    const token = b64urlEncodeBytes(tokenBytes);
+    const tokenHash = await sha256Hex(token);
+    const id = newId("pwr");
+    const ts = nowIso();
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+
+    await env.DB.prepare(
+      `INSERT INTO password_reset_tokens (id, user_id, email, token_hash, expires_at, used_at, created_at)
+       VALUES (?, ?, ?, ?, ?, NULL, ?)`
+    )
+      .bind(id, user.id, email, tokenHash, expiresAt, ts)
+      .run();
+
+    const origin = originFromRequest(request);
+    const link = `${origin}/login?reset=${encodeURIComponent(token)}`;
+    await deliverReminder(env, {
+      toEmail: email,
+      subject: "Reset your Vanderven CRM password",
+      body: [
+        `Hi ${user.name || "there"},`,
+        "",
+        "Use this link to choose a new CRM password (expires in 1 hour):",
+        link,
+        "",
+        "If you didn't ask for this, you can ignore this email.",
+      ].join("\n"),
+      html: `<p>Hi ${escapeHtmlMail(user.name || "there")},</p>
+<p>Use this link to choose a new CRM password (expires in 1 hour):</p>
+<p><a href="${link}">Reset password</a></p>
+<p>If you didn't ask for this, you can ignore this email.</p>`,
+    });
+  } catch (err) {
+    console.error("requestPasswordReset failed", err);
+  }
+
+  return generic;
+}
+
+async function confirmPasswordReset(env, tokenRaw, passwordRaw) {
+  const token = String(tokenRaw || "").trim();
+  const password = String(passwordRaw || "");
+  if (!token) return { error: "Reset link is missing or invalid." };
+  if (password.length < 6) return { error: "Password must be at least 6 characters." };
+
+  const tokenHash = await sha256Hex(token);
+  let row;
+  try {
+    row = await env.DB.prepare(
+      `SELECT * FROM password_reset_tokens
+       WHERE token_hash = ? AND used_at IS NULL
+       LIMIT 1`
+    )
+      .bind(tokenHash)
+      .first();
+  } catch {
+    return { error: "Password reset is not available yet.", status: 503 };
+  }
+
+  if (!row) return { error: "This reset link is invalid or already used.", status: 400 };
+  if (new Date(row.expires_at).getTime() < Date.now()) {
+    return { error: "This reset link has expired. Request a new one.", status: 400 };
+  }
+
+  const user = await getUserById(env, row.user_id);
+  if (!user || !Number(user.active)) {
+    return { error: "Account not found or inactive.", status: 400 };
+  }
+
+  const { hash, salt } = await hashPassword(password);
+  const ts = nowIso();
+  await env.DB.prepare(
+    `UPDATE users SET password_hash = ?, password_salt = ?, updated_at = ? WHERE id = ?`
+  )
+    .bind(hash, salt, ts, user.id)
+    .run();
+  await env.DB.prepare(`UPDATE password_reset_tokens SET used_at = ? WHERE id = ?`)
+    .bind(ts, row.id)
+    .run();
+  try {
+    await env.DB.prepare(
+      `UPDATE password_reset_tokens SET used_at = ? WHERE user_id = ? AND used_at IS NULL AND id != ?`
+    )
+      .bind(ts, user.id, row.id)
+      .run();
+  } catch {
+    /* ignore */
+  }
+
+  return { ok: true, email: user.email };
+}
+
 async function createSessionToken(env, user) {
   const secret = env.SESSION_SECRET || env.CRM_PASSWORD || "dev-secret";
   const now = Math.floor(Date.now() / 1000);
@@ -1780,9 +1909,10 @@ async function listLeadNotes(env, leadId) {
 async function addLeadNote(env, leadId, body, { author = "", authorUserId = "", kind = "note" } = {}) {
   const lead = await getLead(env, leadId);
   if (!lead) return { error: "Client not found.", status: 404 };
-  const text = cleanText(body?.body ?? body?.note ?? body, 4000);
-  if (!text) return { error: "Note text is required." };
   const noteKind = cleanText(kind || body?.kind || "note", 40) || "note";
+  const textMax = noteKind === "call" ? 12000 : 4000;
+  const text = cleanText(body?.body ?? body?.note ?? body, textMax);
+  if (!text) return { error: "Note text is required." };
   const id = newId("note");
   const ts = nowIso();
   const who = cleanText(author || body?.author || "", 80);
@@ -1814,14 +1944,18 @@ async function addLeadNote(env, leadId, body, { author = "", authorUserId = "", 
         ? "Revision note"
         : noteKind === "request"
           ? "Client wants"
-          : "Note added";
+          : noteKind === "call"
+            ? "Call transcript"
+            : "Note added";
   await recordActivity(env, leadId, {
     kind:
       noteKind === "revisions_requested" || noteKind === "change_request"
         ? "change_request"
         : noteKind === "request"
           ? "request"
-          : "note",
+          : noteKind === "call"
+            ? "call"
+            : "note",
     entityType: "note",
     entityId: id,
     summary: `${label}: ${text.slice(0, 120)}${text.length > 120 ? "…" : ""}`,
@@ -2116,6 +2250,7 @@ async function getLeadDetail(env, id) {
   const notes = await listLeadNotes(env, id);
   const activity = await listStoredActivity(env, id);
   const timeline = buildTimeline(lead, { notes, activity, ...related });
+  const callRecordings = await listCallRecordingsForLead(env, id);
   return {
     lead,
     notes,
@@ -2124,6 +2259,7 @@ async function getLeadDetail(env, id) {
     jobs: related.jobs,
     invoices: related.invoices,
     reminders: related.reminders,
+    callRecordings,
   };
 }
 
@@ -4262,6 +4398,721 @@ async function deleteInvoice(env, id) {
   return { ok: true };
 }
 
+/* —— ElevenLabs phone agent ↔ CRM —— */
+
+function normalizePhoneDigits(value) {
+  const digits = String(value || "").replace(/\D/g, "");
+  if (digits.length === 11 && digits.startsWith("1")) return digits.slice(1);
+  return digits;
+}
+
+function phonesMatch(a, b) {
+  const left = normalizePhoneDigits(a);
+  const right = normalizePhoneDigits(b);
+  if (!left || !right) return false;
+  if (left === right) return true;
+  const min = Math.min(left.length, right.length);
+  if (min < 7) return false;
+  return left.slice(-10) === right.slice(-10) || left.endsWith(right) || right.endsWith(left);
+}
+
+function getElevenLabsAgentSecret(env) {
+  return cleanText(env.ELEVENLABS_AGENT_SECRET || "", 200);
+}
+
+function getElevenLabsWebhookSecret(env) {
+  return cleanText(env.ELEVENLABS_WEBHOOK_SECRET || env.ELEVENLABS_AGENT_SECRET || "", 200);
+}
+
+function verifyAgentSecret(request, env) {
+  const expected = getElevenLabsAgentSecret(env);
+  if (!expected) return false;
+  const header =
+    request.headers.get("X-Vanderven-Agent-Secret") ||
+    request.headers.get("x-vanderven-agent-secret") ||
+    "";
+  const auth = request.headers.get("Authorization") || "";
+  const bearer = /^Bearer\s+/i.test(auth) ? auth.replace(/^Bearer\s+/i, "").trim() : "";
+  return header === expected || bearer === expected;
+}
+
+async function hmacSha256Hex(secret, message) {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const mac = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(message));
+  return [...new Uint8Array(mac)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function verifyElevenLabsSignature(rawBody, sigHeader, secret) {
+  if (!secret || !sigHeader) return false;
+  const parts = {};
+  for (const piece of String(sigHeader).split(",")) {
+    const idx = piece.indexOf("=");
+    if (idx === -1) continue;
+    parts[piece.slice(0, idx).trim()] = piece.slice(idx + 1).trim();
+  }
+  const timestamp = parts.t;
+  const signature = parts.v0;
+  if (!timestamp || !signature) return false;
+  const age = Math.abs(Date.now() / 1000 - Number(timestamp));
+  if (!Number.isFinite(age) || age > 30 * 60) return false;
+  const expected = await hmacSha256Hex(secret, `${timestamp}.${rawBody}`);
+  if (expected.length !== signature.length) return false;
+  let diff = 0;
+  for (let i = 0; i < expected.length; i++) diff |= expected.charCodeAt(i) ^ signature.charCodeAt(i);
+  return diff === 0;
+}
+
+async function findLeadByPhone(env, phone) {
+  const want = normalizePhoneDigits(phone);
+  if (!want || want.length < 7) return null;
+  try {
+    const result = await env.DB.prepare("SELECT * FROM leads WHERE IFNULL(phone, '') != ''").all();
+    for (const row of result.results || []) {
+      if (phonesMatch(row.phone, want)) return rowToLead(row);
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+async function findLeadByQuery(env, { phone, email, name, business, leadId } = {}) {
+  if (leadId) {
+    const lead = await getLead(env, cleanText(leadId, 64));
+    if (lead) return lead;
+  }
+  if (phone) {
+    const byPhone = await findLeadByPhone(env, phone);
+    if (byPhone) return byPhone;
+  }
+  const mail = cleanText(email, 160).toLowerCase();
+  if (mail) {
+    try {
+      const row = await env.DB.prepare("SELECT * FROM leads WHERE lower(email) = ? LIMIT 1")
+        .bind(mail)
+        .first();
+      if (row) return rowToLead(row);
+    } catch {
+      /* ignore */
+    }
+  }
+  const q = cleanText(name || business, 120);
+  if (q) {
+    const leads = await listLeads(env, { q });
+    if (leads.length === 1) return leads[0];
+    if (leads.length > 1) {
+      const lower = q.toLowerCase();
+      const exact = leads.find(
+        (l) =>
+          String(l.name || "").toLowerCase() === lower ||
+          String(l.business || "").toLowerCase() === lower
+      );
+      if (exact) return exact;
+      return leads[0];
+    }
+  }
+  return null;
+}
+
+function formatLeadNotesBrief(notes, limit = 5) {
+  if (!notes?.length) return "No notes on file.";
+  return notes
+    .slice(0, limit)
+    .map((n, i) => {
+      const when = n.createdAt ? n.createdAt.slice(0, 10) : "";
+      const kind = n.kind && n.kind !== "note" ? `[${n.kind}] ` : "";
+      return `${i + 1}. ${when} ${kind}${cleanText(n.body, 400)}`.trim();
+    })
+    .join("\n");
+}
+
+async function buildCallerContext(env, callerId) {
+  const phone = cleanText(callerId, 40);
+  const emptyVars = {
+    lead_found: "no",
+    lead_id: "",
+    caller_phone: phone || "",
+    caller_name: "",
+    caller_business: "",
+    caller_email: "",
+    caller_stage: "",
+    caller_industry: "",
+    caller_notes: "No matching CRM record for this number.",
+    caller_summary: "Unknown caller. Collect name, business, and best callback number.",
+    contact_name: "",
+    business_name: "",
+    industry: "",
+    last_contact_date: "",
+    last_offer: "",
+    stall_reason: "",
+    pain_point: "",
+    last_price: "",
+    agent_name: "Vera",
+    booking_link: "https://vanderven.ca/contact.html",
+  };
+
+  const lead = phone ? await findLeadByPhone(env, phone) : null;
+  if (!lead) {
+    return {
+      type: "conversation_initiation_client_data",
+      dynamic_variables: emptyVars,
+    };
+  }
+
+  const notes = await listLeadNotes(env, lead.id);
+  const notesBrief = formatLeadNotesBrief(notes, 6);
+  const latestNote = notes[0] || null;
+  const lastContactDate = (latestNote?.createdAt || lead.updatedAt || lead.createdAt || "").slice(0, 10);
+  const summary = [
+    `${lead.name || "Contact"} at ${lead.business || "unknown business"}`,
+    lead.stage ? `Stage: ${lead.stage}` : "",
+    lead.industry ? `Industry: ${lead.industry}` : "",
+    lead.email ? `Email: ${lead.email}` : "",
+  ]
+    .filter(Boolean)
+    .join(". ");
+
+  // Map structured CRM fields into the agent's prompt variables.
+  // Richer sales history (offer / stall / price) lives in notes until those fields exist.
+  return {
+    type: "conversation_initiation_client_data",
+    user_id: lead.id,
+    dynamic_variables: {
+      lead_found: "yes",
+      lead_id: lead.id,
+      caller_phone: lead.phone || phone || "",
+      caller_name: lead.name || "",
+      caller_business: lead.business || "",
+      caller_email: lead.email || "",
+      caller_stage: lead.stage || "",
+      caller_industry: lead.industry || "",
+      caller_notes: notesBrief,
+      caller_summary: summary,
+      contact_name: lead.name || "",
+      business_name: lead.business || "",
+      industry: lead.industry || "",
+      last_contact_date: lastContactDate,
+      last_offer: "",
+      stall_reason: lead.stage === "lost" ? "Previously marked lost / not proceeding" : "",
+      pain_point: cleanText(lead.notes, 400),
+      last_price: "",
+      agent_name: "Vera",
+      booking_link: "https://vanderven.ca/contact.html",
+    },
+  };
+}
+
+function extractToolParams(body = {}) {
+  if (body.parameters && typeof body.parameters === "object") return body.parameters;
+  return body;
+}
+
+function formatTranscriptText(data = {}) {
+  const summary = cleanText(data?.analysis?.transcript_summary, 2000);
+  const turns = Array.isArray(data?.transcript) ? data.transcript : [];
+  const lines = turns
+    .map((turn) => {
+      const role = cleanText(turn?.role, 20) || "unknown";
+      const message = cleanText(turn?.message, 2000);
+      if (!message) return "";
+      return `${role}: ${message}`;
+    })
+    .filter(Boolean);
+  const transcript = lines.join("\n");
+  const parts = [];
+  if (summary) parts.push(`Summary:\n${summary}`);
+  if (transcript) parts.push(`Transcript:\n${transcript}`);
+  if (!parts.length) parts.push("Call completed (no transcript text available).");
+  const conversationId = cleanText(data?.conversation_id, 80);
+  if (conversationId) parts.unshift(`ElevenLabs conversation: ${conversationId}`);
+  return parts.join("\n\n").slice(0, 12000);
+}
+
+function extractCallerPhoneFromElevenLabs(data = {}) {
+  const meta = data.metadata || {};
+  const phone =
+    meta.caller_id ||
+    meta.from_number ||
+    meta.phone_number ||
+    meta?.phone_call?.external_number ||
+    meta?.phone_call?.agent_number ||
+    data?.conversation_initiation_client_data?.dynamic_variables?.caller_phone ||
+    data?.conversation_initiation_client_data?.dynamic_variables?.system__caller_id ||
+    "";
+  return cleanText(phone, 40);
+}
+
+function recordingPath(conversationId) {
+  return `/api/calls/${cleanText(conversationId, 80)}/audio`;
+}
+
+function recordingMarker(conversationId) {
+  return `Recording: ${recordingPath(conversationId)}`;
+}
+
+function base64ToBytes(b64) {
+  const cleaned = String(b64 || "").replace(/\s+/g, "");
+  if (!cleaned) return null;
+  const binary = atob(cleaned);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+async function getCallRecording(env, conversationId) {
+  const id = cleanText(conversationId, 80);
+  if (!id || !env.DB) return null;
+  try {
+    return await env.DB.prepare("SELECT * FROM call_recordings WHERE conversation_id = ?")
+      .bind(id)
+      .first();
+  } catch {
+    return null;
+  }
+}
+
+async function upsertCallRecording(
+  env,
+  { conversationId, leadId = null, noteId = null, r2Key = null, contentType = null, byteSize = 0 } = {}
+) {
+  const idKey = cleanText(conversationId, 80);
+  if (!idKey || !env.DB) return null;
+  const ts = nowIso();
+  const existing = await getCallRecording(env, idKey);
+  try {
+    if (existing) {
+      await env.DB.prepare(
+        `UPDATE call_recordings
+         SET lead_id = COALESCE(?, lead_id),
+             note_id = COALESCE(?, note_id),
+             r2_key = COALESCE(?, r2_key),
+             content_type = COALESCE(?, content_type),
+             byte_size = CASE WHEN ? > 0 THEN ? ELSE byte_size END,
+             updated_at = ?
+         WHERE conversation_id = ?`
+      )
+        .bind(
+          leadId || null,
+          noteId || null,
+          r2Key || null,
+          contentType || null,
+          Number(byteSize) || 0,
+          Number(byteSize) || 0,
+          ts,
+          idKey
+        )
+        .run();
+      return getCallRecording(env, idKey);
+    }
+    const id = newId("call");
+    await env.DB.prepare(
+      `INSERT INTO call_recordings
+        (id, conversation_id, lead_id, note_id, r2_key, content_type, byte_size, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+      .bind(
+        id,
+        idKey,
+        leadId || null,
+        noteId || null,
+        r2Key || null,
+        contentType || "audio/mpeg",
+        Number(byteSize) || 0,
+        ts,
+        ts
+      )
+      .run();
+    return getCallRecording(env, idKey);
+  } catch (err) {
+    console.error("upsertCallRecording failed", err);
+    return null;
+  }
+}
+
+async function appendRecordingMarkerToNote(env, noteId, conversationId) {
+  const id = cleanText(noteId, 64);
+  const conv = cleanText(conversationId, 80);
+  if (!id || !conv || !env.DB) return;
+  const marker = recordingMarker(conv);
+  try {
+    const row = await env.DB.prepare("SELECT body FROM lead_notes WHERE id = ?").bind(id).first();
+    if (!row) return;
+    const body = String(row.body || "");
+    if (body.includes(marker)) return;
+    const next = `${body}\n\n${marker}`.slice(0, 12000);
+    await env.DB.prepare("UPDATE lead_notes SET body = ?, updated_at = ? WHERE id = ?")
+      .bind(next, nowIso(), id)
+      .run();
+  } catch {
+    /* ignore */
+  }
+}
+
+async function listCallRecordingsForLead(env, leadId) {
+  try {
+    const result = await env.DB.prepare(
+      `SELECT conversation_id, note_id, r2_key, content_type, byte_size, created_at
+       FROM call_recordings
+       WHERE lead_id = ? AND IFNULL(r2_key, '') != ''
+       ORDER BY created_at DESC`
+    )
+      .bind(leadId)
+      .all();
+    return (result.results || []).map((row) => ({
+      conversationId: row.conversation_id,
+      noteId: row.note_id || "",
+      audioUrl: recordingPath(row.conversation_id),
+      contentType: row.content_type || "audio/mpeg",
+      byteSize: row.byte_size || 0,
+      createdAt: row.created_at,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+async function handleElevenLabsPostCallAudio(env, data = {}) {
+  if (!env.CALL_AUDIO) {
+    return json(
+      { ok: false, error: "CALL_AUDIO R2 binding is not configured. Enable R2 and redeploy." },
+      { status: 503 }
+    );
+  }
+  const conversationId = cleanText(data.conversation_id, 80);
+  const audioB64 = data.full_audio || data.audio || "";
+  if (!conversationId || !audioB64) {
+    return badRequest("conversation_id and full_audio are required.");
+  }
+  const bytes = base64ToBytes(audioB64);
+  if (!bytes?.length) return badRequest("Invalid audio payload.");
+
+  const r2Key = `calls/${conversationId}.mp3`;
+  await env.CALL_AUDIO.put(r2Key, bytes, {
+    httpMetadata: { contentType: "audio/mpeg" },
+    customMetadata: {
+      conversationId,
+      agentId: cleanText(data.agent_id, 80),
+    },
+  });
+
+  let existing = await getCallRecording(env, conversationId);
+  let leadId = existing?.lead_id || cleanText(data.user_id, 64) || null;
+  if (leadId) {
+    const lead = await getLead(env, leadId);
+    if (!lead) leadId = null;
+  }
+
+  const row = await upsertCallRecording(env, {
+    conversationId,
+    leadId,
+    noteId: existing?.note_id || null,
+    r2Key,
+    contentType: "audio/mpeg",
+    byteSize: bytes.length,
+  });
+
+  if (row?.note_id) {
+    await appendRecordingMarkerToNote(env, row.note_id, conversationId);
+  } else if (leadId) {
+    const saved = await addLeadNote(
+      env,
+      leadId,
+      {
+        body: `Call recording attached.\nElevenLabs conversation: ${conversationId}\n\n${recordingMarker(
+          conversationId
+        )}`,
+        kind: "call",
+      },
+      { author: "Vera (phone)", kind: "call" }
+    );
+    if (saved.note?.id) {
+      await upsertCallRecording(env, {
+        conversationId,
+        leadId,
+        noteId: saved.note.id,
+        r2Key,
+        contentType: "audio/mpeg",
+        byteSize: bytes.length,
+      });
+    }
+  }
+
+  return json({
+    ok: true,
+    conversation_id: conversationId,
+    lead_id: row?.lead_id || leadId || "",
+    bytes: bytes.length,
+  });
+}
+
+async function handleElevenLabsPostCallTranscript(env, data = {}) {
+  const conversationId = cleanText(data.conversation_id, 80);
+  const phone = extractCallerPhoneFromElevenLabs(data);
+  const lead = await ensureLeadForCall(env, phone, data);
+  if (!lead) {
+    return json({ ok: false, error: "Could not create CRM lead." }, { status: 500 });
+  }
+
+  let body = formatTranscriptText(data);
+  const existing = conversationId ? await getCallRecording(env, conversationId) : null;
+  if (conversationId && existing?.r2_key) {
+    const marker = recordingMarker(conversationId);
+    if (!body.includes(marker)) body = `${body}\n\n${marker}`.slice(0, 12000);
+  }
+
+  const saved = await addLeadNote(
+    env,
+    lead.id,
+    { body, kind: "call" },
+    { author: "Vera (phone)", kind: "call" }
+  );
+  if (saved.error) {
+    return json({ ok: false, error: saved.error }, { status: saved.status || 500 });
+  }
+
+  if (conversationId) {
+    await upsertCallRecording(env, {
+      conversationId,
+      leadId: lead.id,
+      noteId: saved.note?.id || null,
+      r2Key: existing?.r2_key || null,
+      contentType: existing?.content_type || null,
+      byteSize: existing?.byte_size || 0,
+    });
+  }
+
+  return json({ ok: true, lead_id: lead.id, note_id: saved.note?.id || "" });
+}
+
+async function handleElevenLabsPostCallWebhook(request, env) {
+  const secret = getElevenLabsWebhookSecret(env);
+  if (!secret) {
+    return json({ error: "ELEVENLABS_WEBHOOK_SECRET is not configured." }, { status: 503 });
+  }
+  const rawBody = await request.text();
+  const signature =
+    request.headers.get("ElevenLabs-Signature") || request.headers.get("elevenlabs-signature") || "";
+  const valid = await verifyElevenLabsSignature(rawBody, signature, secret);
+  if (!valid) {
+    return json({ error: "Invalid signature." }, { status: 401 });
+  }
+  let event;
+  try {
+    event = JSON.parse(rawBody);
+  } catch {
+    return badRequest("Invalid JSON body.");
+  }
+  const type = event?.type || "post_call_transcription";
+  const data = event?.data || event || {};
+  if (type === "post_call_audio") {
+    return handleElevenLabsPostCallAudio(env, data);
+  }
+  if (type === "post_call_transcription" || !event?.type) {
+    return handleElevenLabsPostCallTranscript(env, data);
+  }
+  return json({ ok: true, ignored: type });
+}
+
+async function ensureLeadForCall(env, phone, data = {}) {
+  let lead = phone ? await findLeadByPhone(env, phone) : null;
+  if (lead) return lead;
+  const vars = data?.conversation_initiation_client_data?.dynamic_variables || {};
+  const name =
+    cleanText(vars.caller_name, 120) ||
+    (phone ? `Caller ${normalizePhoneDigits(phone).slice(-4)}` : "Phone caller");
+  const business = cleanText(vars.caller_business, 160) || "Inbound call";
+  const created = await createLead(
+    env,
+    {
+      name,
+      business,
+      phone: phone || "",
+      email: cleanText(vars.caller_email, 160),
+      notes: "Created from ElevenLabs inbound call.",
+    },
+    { source: "elevenlabs", stage: "new", author: "Vera (phone)" }
+  );
+  return created.lead || null;
+}
+
+async function handleElevenLabsCallerContext(request, env) {
+  if (!getElevenLabsAgentSecret(env)) {
+    return json({ error: "ELEVENLABS_AGENT_SECRET is not configured." }, { status: 503 });
+  }
+  if (!verifyAgentSecret(request, env)) {
+    return json({ error: "Unauthorized." }, { status: 401 });
+  }
+  const url = new URL(request.url);
+  let callerId = url.searchParams.get("caller_id") || url.searchParams.get("from_number") || "";
+  if (request.method === "POST") {
+    try {
+      const body = await request.json();
+      callerId =
+        body.caller_id ||
+        body.callerId ||
+        body.from_number ||
+        body.from ||
+        body.parameters?.caller_id ||
+        callerId;
+    } catch {
+      /* query params only */
+    }
+  }
+  const payload = await buildCallerContext(env, callerId);
+  return json(payload);
+}
+
+async function handleElevenLabsLookupLead(request, env) {
+  if (!getElevenLabsAgentSecret(env)) {
+    return json({ result: { error: "Agent secret not configured." } }, { status: 503 });
+  }
+  if (!verifyAgentSecret(request, env)) {
+    return json({ result: { error: "Unauthorized." } }, { status: 401 });
+  }
+  let body = {};
+  try {
+    body = await request.json();
+  } catch {
+    body = {};
+  }
+  const params = extractToolParams(body);
+  const lead = await findLeadByQuery(env, {
+    phone: params.phone || params.caller_id || params.caller_phone,
+    email: params.email,
+    name: params.name || params.caller_name,
+    business: params.business || params.company || params.caller_business,
+    leadId: params.lead_id || params.leadId,
+  });
+  if (!lead) {
+    return json({
+      result: {
+        found: false,
+        message: "No matching CRM lead.",
+      },
+    });
+  }
+  return json({
+    result: {
+      found: true,
+      lead_id: lead.id,
+      name: lead.name,
+      business: lead.business,
+      email: lead.email,
+      phone: lead.phone,
+      stage: lead.stage,
+      industry: lead.industry,
+      notes_summary: cleanText(lead.notes, 800),
+    },
+  });
+}
+
+async function handleElevenLabsGetNotes(request, env) {
+  if (!getElevenLabsAgentSecret(env)) {
+    return json({ result: { error: "Agent secret not configured." } }, { status: 503 });
+  }
+  if (!verifyAgentSecret(request, env)) {
+    return json({ result: { error: "Unauthorized." } }, { status: 401 });
+  }
+  let body = {};
+  try {
+    body = await request.json();
+  } catch {
+    body = {};
+  }
+  const params = extractToolParams(body);
+  const lead = await findLeadByQuery(env, {
+    phone: params.phone || params.caller_id || params.caller_phone,
+    email: params.email,
+    name: params.name,
+    business: params.business || params.company,
+    leadId: params.lead_id || params.leadId,
+  });
+  if (!lead) {
+    return json({ result: { found: false, message: "No matching CRM lead." } });
+  }
+  const limit = Math.min(Math.max(Number(params.limit) || 8, 1), 20);
+  const notes = await listLeadNotes(env, lead.id);
+  return json({
+    result: {
+      found: true,
+      lead_id: lead.id,
+      name: lead.name,
+      business: lead.business,
+      notes: notes.slice(0, limit).map((n) => ({
+        kind: n.kind,
+        author: n.author,
+        created_at: n.createdAt,
+        body: cleanText(n.body, 1200),
+      })),
+      notes_text: formatLeadNotesBrief(notes, limit),
+    },
+  });
+}
+
+async function handleElevenLabsAddNote(request, env) {
+  if (!getElevenLabsAgentSecret(env)) {
+    return json({ result: { error: "Agent secret not configured." } }, { status: 503 });
+  }
+  if (!verifyAgentSecret(request, env)) {
+    return json({ result: { error: "Unauthorized." } }, { status: 401 });
+  }
+  let body = {};
+  try {
+    body = await request.json();
+  } catch {
+    body = {};
+  }
+  const params = extractToolParams(body);
+  const noteText = cleanText(params.note || params.body || params.text, 4000);
+  if (!noteText) {
+    return json({ result: { ok: false, message: "Note text is required." } });
+  }
+  let lead = await findLeadByQuery(env, {
+    phone: params.phone || params.caller_id || params.caller_phone,
+    email: params.email,
+    name: params.name,
+    business: params.business || params.company,
+    leadId: params.lead_id || params.leadId,
+  });
+  if (!lead) {
+    const phone = cleanText(params.phone || params.caller_id || params.caller_phone, 40);
+    lead = await ensureLeadForCall(env, phone, {
+      conversation_initiation_client_data: {
+        dynamic_variables: {
+          caller_name: params.name,
+          caller_business: params.business || params.company,
+          caller_email: params.email,
+        },
+      },
+    });
+  }
+  if (!lead) {
+    return json({ result: { ok: false, message: "Could not find or create a CRM lead." } });
+  }
+  const saved = await addLeadNote(
+    env,
+    lead.id,
+    { body: noteText, kind: cleanText(params.kind, 40) || "note" },
+    { author: "Vera (phone)", kind: cleanText(params.kind, 40) || "note" }
+  );
+  if (saved.error) {
+    return json({ result: { ok: false, message: saved.error } }, { status: saved.status || 400 });
+  }
+  return json({
+    result: {
+      ok: true,
+      lead_id: lead.id,
+      note_id: saved.note?.id || "",
+    },
+  });
+}
+
 async function handleApi(request, env) {
   const url = new URL(request.url);
   const path = url.pathname;
@@ -4272,7 +5123,8 @@ async function handleApi(request, env) {
       status: 204,
       headers: {
         "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type",
+        "Access-Control-Allow-Headers":
+          "Content-Type, Authorization, X-Vanderven-Agent-Secret, ElevenLabs-Signature",
         "Access-Control-Allow-Credentials": "true",
       },
     });
@@ -4340,6 +5192,27 @@ async function handleApi(request, env) {
     });
   }
 
+  // ElevenLabs: load CRM context when a call starts
+  if (path === "/api/public/agents/caller-context" && (method === "GET" || method === "POST")) {
+    return handleElevenLabsCallerContext(request, env);
+  }
+
+  // ElevenLabs tools during a call
+  if (path === "/api/public/agents/lookup-lead" && method === "POST") {
+    return handleElevenLabsLookupLead(request, env);
+  }
+  if (path === "/api/public/agents/get-notes" && method === "POST") {
+    return handleElevenLabsGetNotes(request, env);
+  }
+  if (path === "/api/public/agents/add-note" && method === "POST") {
+    return handleElevenLabsAddNote(request, env);
+  }
+
+  // ElevenLabs post-call transcript → CRM note
+  if (path === "/api/public/webhooks/elevenlabs" && method === "POST") {
+    return handleElevenLabsPostCallWebhook(request, env);
+  }
+
   if (path === "/api/login" && method === "POST") {
     let body;
     try {
@@ -4383,6 +5256,33 @@ async function handleApi(request, env) {
         headers: { "Set-Cookie": sessionCookie(token, request.url) },
       }
     );
+  }
+
+  if (path === "/api/public/password-reset/request" && method === "POST") {
+    let body;
+    try {
+      body = await request.json();
+    } catch {
+      return badRequest("Invalid JSON body.");
+    }
+    const result = await requestPasswordReset(env, body.email, request);
+    if (result.error) return badRequest(result.error);
+    return json(result);
+  }
+
+  if (path === "/api/public/password-reset/confirm" && method === "POST") {
+    let body;
+    try {
+      body = await request.json();
+    } catch {
+      return badRequest("Invalid JSON body.");
+    }
+    const password = String(body.password || body.newPassword || "");
+    const confirm = String(body.confirmPassword || body.confirm || password);
+    if (password !== confirm) return badRequest("Passwords do not match.");
+    const result = await confirmPasswordReset(env, body.token, password);
+    if (result.error) return json({ error: result.error }, { status: result.status || 400 });
+    return json({ ok: true, email: result.email || "" });
   }
 
   if (path === "/api/logout" && method === "POST") {
@@ -4488,6 +5388,21 @@ async function handleAuthedApi(request, env, sessionUser, url, path, method) {
     const result = await rewriteNoteText(env, body);
     if (result.error) return json({ error: result.error }, { status: result.status || 400 });
     return json({ text: result.text, tone: result.tone, context: result.context });
+  }
+
+  const callAudioMatch = path.match(/^\/api\/calls\/([^/]+)\/audio$/);
+  if (callAudioMatch && method === "GET") {
+    const conversationId = decodeURIComponent(callAudioMatch[1] || "");
+    const row = await getCallRecording(env, conversationId);
+    if (!row?.r2_key) return json({ error: "Recording not found." }, { status: 404 });
+    if (!env.CALL_AUDIO) return json({ error: "Audio storage unavailable." }, { status: 503 });
+    const object = await env.CALL_AUDIO.get(row.r2_key);
+    if (!object) return json({ error: "Recording file missing." }, { status: 404 });
+    const headers = new Headers();
+    headers.set("Content-Type", row.content_type || object.httpMetadata?.contentType || "audio/mpeg");
+    headers.set("Cache-Control", "private, max-age=3600");
+    if (row.byte_size) headers.set("Content-Length", String(row.byte_size));
+    return new Response(object.body, { status: 200, headers });
   }
 
   if (path === "/api/leads" && method === "GET") {
