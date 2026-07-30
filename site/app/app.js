@@ -3460,7 +3460,7 @@
           <strong>Could not load the PDF editor.</strong>
           <p class="muted">Check your connection and try again.</p>
         </div>`;
-      if (typeof toast === "function") toast(err.message || "Could not load PDF editor");
+      toast(err.message || "Could not load PDF editor");
     }
   }
 
