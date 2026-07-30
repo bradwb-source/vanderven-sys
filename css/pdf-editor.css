@@ -221,6 +221,13 @@
   transition: background 0.25s var(--ease), border-color 0.25s var(--ease);
 }
 
+.pdf-drop[hidden],
+.pdf-pages[hidden],
+.pdf-status[hidden],
+.pdf-modal__body[hidden] {
+  display: none !important;
+}
+
 .pdf-drop.is-dragover {
   background: rgba(184, 149, 62, 0.1);
   outline: 1px dashed var(--gold);
