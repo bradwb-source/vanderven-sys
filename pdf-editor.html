@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PDF Editor | Vanderven Systems</title>
+    <meta
+      name="description"
+      content="Edit, annotate, and sign PDFs in your browser. Nothing is uploaded or stored — files stay on your device."
+    />
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="icon" href="/public/favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/public/favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/public/favicon-192.png" />
+    <link rel="apple-touch-icon" href="/public/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <meta name="theme-color" content="#141820" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Vanderven Systems" />
+    <meta property="og:title" content="PDF Editor | Vanderven Systems" />
+    <meta property="og:description" content="Edit, annotate, and sign PDFs in your browser. Nothing is uploaded or stored." />
+    <meta property="og:url" content="https://vanderven-sys.brad-w-boudreaux.workers.dev/pdf-editor.html" />
+    <meta property="og:image" content="https://vanderven-sys.brad-w-boudreaux.workers.dev/public/photos/og.jpg" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="PDF Editor | Vanderven Systems" />
+    <meta name="twitter:description" content="Edit, annotate, and sign PDFs in your browser. Nothing is uploaded or stored." />
+    <meta name="twitter:image" content="https://vanderven-sys.brad-w-boudreaux.workers.dev/public/photos/og.jpg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Outfit:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/css/styles.css" />
+    <link rel="stylesheet" href="/css/pdf-editor.css" />
+  </head>
+  <body data-page="pdf-editor" class="pdf-editor-page">
+    <div id="site-header"></div>
+
+    <main class="pdf-app">
+      <header class="pdf-app__intro">
+        <div class="container pdf-app__intro-inner">
+          <div>
+            <p class="page-hero__eyebrow">Tools</p>
+            <h1 class="pdf-app__title">PDF editor</h1>
+            <p class="pdf-app__lead">
+              Open a file, write on it, drag signatures into place, then download.
+              Everything stays in this browser tab — nothing is uploaded or saved on our servers.
+            </p>
+          </div>
+          <p class="pdf-app__privacy" role="status">
+            <span class="pdf-app__privacy-dot" aria-hidden="true"></span>
+            Local only · closes with the tab
+          </p>
+        </div>
+      </header>
+
+      <div class="pdf-app__shell container">
+        <aside class="pdf-toolbar" aria-label="Editor tools">
+          <div class="pdf-toolbar__group">
+            <button type="button" class="pdf-tool is-active" data-tool="select" title="Select &amp; move (V)">
+              <span>Move</span>
+            </button>
+            <button type="button" class="pdf-tool" data-tool="text" title="Add text (T)">
+              <span>Text</span>
+            </button>
+            <button type="button" class="pdf-tool" data-tool="pen" title="Draw (P)">
+              <span>Draw</span>
+            </button>
+            <button type="button" class="pdf-tool" data-tool="highlight" title="Highlight (H)">
+              <span>Highlight</span>
+            </button>
+            <button type="button" class="pdf-tool" data-tool="signature" title="Place signature (S)">
+              <span>Sign</span>
+            </button>
+            <button type="button" class="pdf-tool" data-tool="image" title="Place image">
+              <span>Image</span>
+            </button>
+          </div>
+
+          <div class="pdf-toolbar__group pdf-toolbar__group--stack">
+            <label class="pdf-field">
+              <span>Ink</span>
+              <input type="color" id="ink-color" value="#1a1f2a" />
+            </label>
+            <label class="pdf-field">
+              <span>Size</span>
+              <input type="range" id="ink-size" min="1" max="18" value="3" />
+            </label>
+            <label class="pdf-field">
+              <span>Text size</span>
+              <input type="range" id="text-size" min="10" max="48" value="16" />
+            </label>
+          </div>
+
+          <div class="pdf-toolbar__group">
+            <button type="button" class="pdf-tool pdf-tool--ghost" id="btn-undo" title="Undo" disabled>Undo</button>
+            <button type="button" class="pdf-tool pdf-tool--ghost" id="btn-delete" title="Delete selected" disabled>
+              Delete
+            </button>
+            <button type="button" class="pdf-tool pdf-tool--ghost" id="btn-clear" title="Clear all marks" disabled>
+              Clear
+            </button>
+          </div>
+
+          <div class="pdf-toolbar__group pdf-toolbar__group--end">
+            <button type="button" class="btn btn--ghost" id="btn-open">Open PDF</button>
+            <button type="button" class="btn btn--gold" id="btn-download" disabled>Download</button>
+            <input type="file" id="file-input" accept="application/pdf,.pdf" hidden />
+            <input type="file" id="image-input" accept="image/png,image/jpeg,image/webp" hidden />
+          </div>
+        </aside>
+
+        <section class="pdf-stage" aria-label="PDF canvas">
+          <div class="pdf-drop" id="drop-zone">
+            <div class="pdf-drop__card">
+              <p class="pdf-drop__eyebrow">Start here</p>
+              <h2 class="pdf-drop__title">Drop a PDF onto this page</h2>
+              <p class="pdf-drop__lead">Or choose a file. It never leaves your device.</p>
+              <button type="button" class="btn btn--gold" id="btn-open-drop">Choose PDF</button>
+            </div>
+          </div>
+          <div class="pdf-pages" id="pages" hidden></div>
+          <p class="pdf-status" id="status" hidden></p>
+        </section>
+      </div>
+    </main>
+
+    <div id="site-footer"></div>
+
+    <dialog class="pdf-modal" id="signature-modal" aria-labelledby="signature-modal-title">
+      <form method="dialog" class="pdf-modal__panel" id="signature-form">
+        <header class="pdf-modal__head">
+          <h2 id="signature-modal-title">Create signature</h2>
+          <p>Draw or type a signature, then place and drag it on the PDF.</p>
+        </header>
+        <div class="pdf-modal__tabs" role="tablist">
+          <button type="button" class="pdf-tab is-active" data-sig-tab="draw" role="tab" aria-selected="true">
+            Draw
+          </button>
+          <button type="button" class="pdf-tab" data-sig-tab="type" role="tab" aria-selected="false">Type</button>
+        </div>
+        <div class="pdf-modal__body" data-sig-panel="draw">
+          <canvas id="sig-canvas" width="640" height="220" aria-label="Signature drawing pad"></canvas>
+          <button type="button" class="pdf-tool pdf-tool--ghost" id="btn-sig-clear">Clear pad</button>
+        </div>
+        <div class="pdf-modal__body" data-sig-panel="type" hidden>
+          <label class="pdf-field pdf-field--grow">
+            <span>Your name</span>
+            <input type="text" id="sig-typed" placeholder="Jordan Lee" autocomplete="name" maxlength="80" />
+          </label>
+          <p class="pdf-typed-preview" id="sig-typed-preview" aria-hidden="true">Jordan Lee</p>
+        </div>
+        <footer class="pdf-modal__actions">
+          <button type="submit" value="cancel" class="btn btn--ghost">Cancel</button>
+          <button type="submit" value="use" class="btn btn--gold" id="btn-sig-use">Use signature</button>
+        </footer>
+      </form>
+    </dialog>
+
+    <script src="/js/chrome.js"></script>
+    <script src="/js/main.js"></script>
+    <script type="module" src="/js/pdf-editor.js"></script>
+  </body>
+</html>
