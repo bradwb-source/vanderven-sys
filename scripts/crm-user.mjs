@@ -22,7 +22,7 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, "..");
 const DB_NAME = "vanderven-crm";
-const PERSIST = join(ROOT, "..", ".vanderven-wrangler-state");
+const PERSIST = join(ROOT, ".vanderven-wrangler-state");
 // Must stay ≤ 100000 — Workers WebCrypto rejects higher counts at login time.
 const ITERATIONS = 100_000;
 const KEY_LEN = 32;

@@ -3,6 +3,7 @@ site/public/photos/_fresh/
 .DS_Store
 assets/
 .wrangler/
+.vanderven-wrangler-state/
 .dev.vars
 .deploy-secrets.tmp
 node_modules/
