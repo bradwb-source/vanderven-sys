@@ -67,6 +67,10 @@
     },
     reminders: { title: "Reminders", sub: "Automated quote follow-ups for you and the client." },
     settings: { title: "Settings", sub: "Password, outbound email, users, quote attachments, and reminders." },
+    pdf: {
+      title: "PDF editor",
+      sub: "Open, annotate, sign, and download — local only, nothing saved on the server.",
+    },
     games: { title: "Games", sub: "Arcade breakers when you need a minute." },
   };
 
@@ -110,6 +114,8 @@
     veraDetail: null,
     gamesActiveId: null,
     gamesHandle: null,
+    pdfEditorApi: null,
+    pdfEditorHandle: null,
   };
 
   const SLOT_START_HOUR = 8;
@@ -129,6 +135,7 @@
     vera: document.getElementById("view-vera"),
     reminders: document.getElementById("view-reminders"),
     settings: document.getElementById("view-settings"),
+    pdf: document.getElementById("view-pdf"),
     games: document.getElementById("view-games"),
     search: document.getElementById("search"),
     searchMenu: document.getElementById("search-menu"),
@@ -231,6 +238,7 @@
     vera: els.vera,
     reminders: els.reminders,
     settings: els.settings,
+    pdf: els.pdf,
     games: els.games,
   };
 
@@ -1301,8 +1309,9 @@
 
     applyViewHeader(view);
     els.search.placeholder = view === "vera" ? "Search Vera chats" : "Search everything";
-    els.search.hidden = view === "games";
-    if (els.searchMenu) els.searchMenu.hidden = view === "games";
+    const hideSearch = view === "games" || view === "pdf";
+    els.search.hidden = hideSearch;
+    if (els.searchMenu) els.searchMenu.hidden = hideSearch;
 
     renderFilters();
     render();
@@ -3427,9 +3436,32 @@
       vera: renderVera,
       reminders: renderReminders,
       settings: renderSettings,
+      pdf: renderPdfEditor,
       games: renderGames,
     };
     (map[state.view] || renderHome)();
+  }
+
+  async function renderPdfEditor() {
+    if (!els.pdf) return;
+    if (els.pdf.dataset.pdfMounted === "1") return;
+    try {
+      if (!state.pdfEditorApi) {
+        state.pdfEditorApi = await import("/app/pdf-editor.js");
+      }
+      if (state.pdfEditorHandle && typeof state.pdfEditorHandle.destroy === "function") {
+        state.pdfEditorHandle.destroy();
+      }
+      state.pdfEditorHandle = state.pdfEditorApi.mountCrmPdfEditor(els.pdf);
+    } catch (err) {
+      console.error(err);
+      els.pdf.innerHTML = `
+        <div class="panel" style="padding:1.25rem">
+          <strong>Could not load the PDF editor.</strong>
+          <p class="muted">Check your connection and try again.</p>
+        </div>`;
+      if (typeof toast === "function") toast(err.message || "Could not load PDF editor");
+    }
   }
 
   const GAMES_CATALOG = [
