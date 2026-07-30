@@ -47,6 +47,8 @@
           <p class="mobile-nav__label">Follow-up</p>
           <button type="button" data-view="reminders">Reminders</button>
           <button type="button" data-view="settings">Settings</button>
+          <p class="mobile-nav__label">Tools</p>
+          <button type="button" data-view="pdf">PDF</button>
           <p class="mobile-nav__label">Break</p>
           <button type="button" data-view="games">Games</button>
           <div class="mobile-nav__foot">
@@ -87,6 +89,9 @@
           <p class="app-nav__label">Follow-up</p>
           <button type="button" data-view="reminders">Reminders</button>
           <button type="button" data-view="settings">Settings</button>
+
+          <p class="app-nav__label">Tools</p>
+          <button type="button" data-view="pdf">PDF</button>
 
           <p class="app-nav__label">Break</p>
           <button type="button" data-view="games">Games</button>
@@ -181,6 +186,7 @@
         <section id="view-vera" aria-label="Vera chats" hidden></section>
         <section id="view-reminders" aria-label="Reminders" hidden></section>
         <section id="view-settings" aria-label="Settings" hidden></section>
+        <section id="view-pdf" aria-label="PDF editor" hidden></section>
         <section id="view-games" aria-label="Games" hidden></section><!-- games-v1 -->
       </main>
     </div>
@@ -741,6 +747,7 @@
     </aside>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="/app/pdf-editor.js"></script>
     <script src="/app/app.js"></script>
   </body>
 </html>

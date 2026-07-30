@@ -67,6 +67,10 @@
     },
     reminders: { title: "Reminders", sub: "Automated quote follow-ups for you and the client." },
     settings: { title: "Settings", sub: "Password, outbound email, users, quote attachments, and reminders." },
+    pdf: {
+      title: "PDF",
+      sub: "Open a PDF and mark it up — nothing is stored in the CRM.",
+    },
     games: { title: "Games", sub: "Arcade breakers when you need a minute." },
   };
 
@@ -110,6 +114,7 @@
     veraDetail: null,
     gamesActiveId: null,
     gamesHandle: null,
+    pdfMounted: false,
   };
 
   const SLOT_START_HOUR = 8;
@@ -129,6 +134,7 @@
     vera: document.getElementById("view-vera"),
     reminders: document.getElementById("view-reminders"),
     settings: document.getElementById("view-settings"),
+    pdf: document.getElementById("view-pdf"),
     games: document.getElementById("view-games"),
     search: document.getElementById("search"),
     searchMenu: document.getElementById("search-menu"),
@@ -231,6 +237,7 @@
     vera: els.vera,
     reminders: els.reminders,
     settings: els.settings,
+    pdf: els.pdf,
     games: els.games,
   };
 
@@ -1271,11 +1278,26 @@
     state.gamesHandle = null;
   }
 
+  function destroyPdfEditor() {
+    if (window.PdfEditor && typeof window.PdfEditor.destroy === "function") {
+      try {
+        window.PdfEditor.destroy();
+      } catch {
+        /* ignore teardown errors */
+      }
+    }
+    state.pdfMounted = false;
+    if (els.pdf) els.pdf.innerHTML = "";
+  }
+
   function setView(view) {
     if (!VIEW_COPY[view]) return;
     if (state.view === "games" && view !== "games") {
       stopActiveGame();
       state.gamesActiveId = null;
+    }
+    if (state.view === "pdf" && view !== "pdf") {
+      destroyPdfEditor();
     }
     state.view = view;
     if (view !== "vera") state.veraDetail = null;
@@ -1301,8 +1323,12 @@
 
     applyViewHeader(view);
     els.search.placeholder = view === "vera" ? "Search Vera chats" : "Search everything";
-    els.search.hidden = view === "games";
-    if (els.searchMenu) els.searchMenu.hidden = view === "games";
+    const hideChrome = view === "games" || view === "pdf";
+    els.search.hidden = hideChrome;
+    if (els.searchMenu) els.searchMenu.hidden = hideChrome;
+    const createMenu = els.quickCreate?.closest(".create-menu");
+    if (createMenu) createMenu.hidden = view === "pdf";
+    if (view === "pdf") closeCreateMenu();
 
     renderFilters();
     render();
@@ -3427,9 +3453,24 @@
       vera: renderVera,
       reminders: renderReminders,
       settings: renderSettings,
+      pdf: renderPdf,
       games: renderGames,
     };
     (map[state.view] || renderHome)();
+  }
+
+  function renderPdf() {
+    if (!els.pdf) return;
+    if (!window.PdfEditor || typeof window.PdfEditor.mount !== "function") {
+      els.pdf.innerHTML = `<div class="pdf-editor pdf-editor--empty"><p>PDF editor failed to load.</p></div>`;
+      state.pdfMounted = false;
+      return;
+    }
+    if (state.pdfMounted && els.pdf.querySelector(".pdf-editor")) return;
+    window.PdfEditor.mount(els.pdf, {
+      toast: (msg) => toast(msg),
+    });
+    state.pdfMounted = true;
   }
 
   const GAMES_CATALOG = [
