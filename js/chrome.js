@@ -73,6 +73,11 @@
         <span>Okanagan, British Columbia</span>
         <span>By appointment</span>
       </div>
+      <nav class="site-footer__nav" aria-label="Tools">
+        <p class="site-footer__label">Tools</p>
+        <a href="pdf-editor.html">PDF editor</a>
+        <span>Local only — nothing uploaded</span>
+      </nav>
     </div>
   </div>
   <div class="container site-footer__bar">

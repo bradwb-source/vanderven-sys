@@ -1559,6 +1559,12 @@ body.nav-open .nav-toggle__bar:nth-child(2) {
   }
 }
 
+@media (min-width: 860px) {
+  .site-footer__cols {
+    grid-template-columns: 1fr 1fr 1fr;
+  }
+}
+
 .site-footer__nav {
   display: grid;
   gap: 0.65rem;
