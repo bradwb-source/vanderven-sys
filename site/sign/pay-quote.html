@@ -139,6 +139,10 @@
         <div class="body">
           <div id="paid-banner" class="banner" hidden>Payment received — thank you. Your deposit is on file.</div>
           <div id="cancel-banner" class="banner warn" hidden>Checkout was cancelled. You can try again or pay by e-transfer.</div>
+          <div id="sign-banner" class="banner warn" hidden>
+            Please sign and approve the quote first.
+            <a id="sign-banner-link" href="#" style="color:inherit;font-weight:700;margin-left:0.35rem;">Continue to sign</a>
+          </div>
 
           <div class="panel">
             <h2>Deposit due to begin</h2>
@@ -198,6 +202,8 @@
           checkoutError: document.getElementById("checkout-error"),
           paidBanner: document.getElementById("paid-banner"),
           cancelBanner: document.getElementById("cancel-banner"),
+          signBanner: document.getElementById("sign-banner"),
+          signBannerLink: document.getElementById("sign-banner-link"),
         };
 
         function money(cents) {
@@ -236,6 +242,17 @@
             els.cardTotal.textContent = money(pay.cardTotalCents);
             els.accounting.textContent = pay.accountingEmail || "accounting@vanderven.ca";
             els.memo.textContent = pay.number || "your quote number";
+            // Prefer the sign page after payment (and when signature is still needed).
+            if (pay.signUrl && (params.get("paid") === "1" || pay.alreadyPaid)) {
+              const dest = new URL(pay.signUrl, location.origin);
+              dest.searchParams.set("paid", "1");
+              location.replace(dest.toString());
+              return;
+            }
+            if (pay.signUrl && pay.needsSignature) {
+              location.replace(pay.signUrl);
+              return;
+            }
             if (params.get("paid") === "1" || pay.alreadyPaid) {
               els.paidBanner.hidden = false;
               els.paidBanner.textContent = pay.alreadyPaid
@@ -250,7 +267,15 @@
                 });
               }
             }
-            if (params.get("cancelled") === "1") els.cancelBanner.hidden = false;
+            if (params.get("cancelled") === "1") {
+              if (pay.signUrl) {
+                const dest = new URL(pay.signUrl, location.origin);
+                dest.searchParams.set("cancelled", "1");
+                location.replace(dest.toString());
+                return;
+              }
+              els.cancelBanner.hidden = false;
+            }
             show("form");
           } catch (err) {
             els.errorDetail.textContent = err.message || "Link unavailable";
@@ -268,7 +293,15 @@
               body: JSON.stringify({ kind: "quote", token }),
             });
             const data = await res.json().catch(() => ({}));
-            if (!res.ok) throw new Error(data.error || "Could not start checkout");
+            if (!res.ok) {
+              if (data.signUrl) {
+                els.signBanner.hidden = false;
+                els.signBannerLink.href = data.signUrl;
+                els.btnCard.hidden = true;
+                throw new Error(data.error || "Please sign the quote first.");
+              }
+              throw new Error(data.error || "Could not start checkout");
+            }
             location.href = data.url;
           } catch (err) {
             els.checkoutError.textContent = err.message || "Checkout failed";

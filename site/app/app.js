@@ -202,6 +202,7 @@
     quoteSubtotalDisplay: document.getElementById("quote-subtotal-display"),
     quoteTotalDisplay: document.getElementById("quote-total-display"),
     printQuote: document.getElementById("print-quote"),
+    previewQuoteClient: document.getElementById("preview-quote-client"),
     sendQuote: document.getElementById("send-quote"),
     copyQuotePayLink: document.getElementById("copy-quote-pay-link"),
     invoiceDrawerClose: document.getElementById("invoice-drawer-close"),
@@ -2427,6 +2428,13 @@
       sentLine = quote.clientViewedAt
         ? `Viewed ${formatDate(quote.clientViewedAt)} · awaiting signature`
         : "Awaiting signature";
+    }
+    const paidCents = Number(quote.depositPaidCents) || 0;
+    if (paidCents > 0) {
+      const when = quote.depositPaidAt
+        ? formatDateTime(quote.depositPaidAt) || formatDate(quote.depositPaidAt)
+        : "";
+      sentLine = `Deposit ${formatMoneyExact(paidCents)} received${when ? ` · ${when}` : ""}`;
     }
     return `
       <article class="doc-card tone-${meta.tone}" data-open-quote="${escapeHtml(quote.id)}">
@@ -5220,6 +5228,23 @@
     els.quoteScheduleBuild.hidden = !show;
   }
 
+  function quoteClientSignUrl(quote) {
+    const token = String(quote?.signToken || "").trim().slice(0, 80);
+    if (!token) return "";
+    return `${location.origin}/sign/q/${encodeURIComponent(token)}`;
+  }
+
+  function syncQuoteClientPreviewButton(quote) {
+    const btn = els.previewQuoteClient;
+    if (!btn) return;
+    const url = quoteClientSignUrl(quote);
+    const canPreview =
+      Boolean(url) &&
+      ["sent", "revisions_requested", "approved", "declined"].includes(String(quote?.status || ""));
+    btn.hidden = !canPreview;
+    btn.dataset.previewUrl = canPreview ? url : "";
+  }
+
   function scheduleBuildFromQuote(quoteId) {
     const quote = state.quotes.find((q) => q.id === quoteId);
     if (!quote) {
@@ -5656,6 +5681,14 @@
     return `Q-${max + 1}`;
   }
 
+  function depositMethodLabel(method) {
+    const m = String(method || "").toLowerCase();
+    if (m === "card") return "Card";
+    if (m === "etransfer") return "e-Transfer";
+    if (m === "manual") return "Manual";
+    return method || "Payment";
+  }
+
   function collectQuoteDraft() {
     if (!els.quoteForm) return null;
     const form = new FormData(els.quoteForm);
@@ -5668,6 +5701,7 @@
     const depositDueCents = readQuoteDepositCents(pricing.amountCents);
     const id = form.get("id") || "";
     const existingNumber = String(form.get("number") || "").trim();
+    const saved = id ? (state.quotes || []).find((q) => q.id === id) : null;
     return {
       id,
       number: existingNumber || (id ? "Q-DRAFT" : suggestNextQuoteNumber()),
@@ -5690,6 +5724,18 @@
       documentIds,
       documents,
       files: state.quoteFiles || [],
+      // Completion state from saved quote (signature + deposit payments)
+      hasSignature: Boolean(saved?.hasSignature),
+      signedName: saved?.signedName || "",
+      signedAt: saved?.signedAt || "",
+      signaturePng: saved?.signaturePng || "",
+      alreadyPaid: Boolean(saved?.alreadyPaid),
+      depositPaidCents: Number(saved?.depositPaidCents) || 0,
+      depositFeeCents: Number(saved?.depositFeeCents) || 0,
+      depositPaidAt: saved?.depositPaidAt || "",
+      depositPaidLatestAt: saved?.depositPaidLatestAt || "",
+      depositPaidMethod: saved?.depositPaidMethod || "",
+      deposits: Array.isArray(saved?.deposits) ? saved.deposits : [],
     };
   }
 
@@ -5813,7 +5859,13 @@
             <p class="quote-sheet__tagline">${escapeHtml(COMPANY.tagline)}</p>
           </div>
           <div class="invoice-sheet__brand-right">
-            <span class="invoice-sheet__kicker">Quote</span>
+            <span class="invoice-sheet__kicker">${
+              quote.status === "approved"
+                ? "Approved quote"
+                : quote.status === "declined"
+                  ? "Declined quote"
+                  : "Quote"
+            }</span>
             <h2>${escapeHtml(quote.number || suggestNextQuoteNumber())}</h2>
             <p>Prepared for ${escapeHtml(clientBiz)}<br/>${escapeHtml(formatMoneyExact(chargeCents))}</p>
           </div>
@@ -5872,6 +5924,79 @@
               </div>`
             : `<div class="invoice-sheet__notes"><p class="muted">No attachments selected for this quote.</p></div>`
         }
+        ${
+          quote.status === "approved" || quote.alreadyPaid || (Number(quote.depositPaidCents) || 0) > 0
+            ? (() => {
+                const paidCents = Number(quote.depositPaidCents) || 0;
+                const payments = Array.isArray(quote.deposits) ? quote.deposits : [];
+                if (paidCents > 0 || payments.length) {
+                  const rows = payments.length
+                    ? payments
+                        .map(
+                          (dep) => `
+                      <div class="quote-sheet__pay-option">
+                        <strong>${escapeHtml(depositMethodLabel(dep.method))} · ${escapeHtml(
+                            formatMoneyExact(dep.amountCents)
+                          )}</strong>
+                        <p class="muted" style="margin:0.35rem 0 0">
+                          Received ${escapeHtml(formatDateTime(dep.createdAt) || formatDate(dep.createdAt) || "—")}
+                          ${
+                            dep.feeCents
+                              ? ` · card fee ${escapeHtml(formatMoneyExact(dep.feeCents))}`
+                              : ""
+                          }
+                        </p>
+                      </div>`
+                        )
+                        .join("")
+                    : `<div class="quote-sheet__pay-option">
+                        <strong>${escapeHtml(formatMoneyExact(paidCents))} received</strong>
+                        <p class="muted" style="margin:0.35rem 0 0">
+                          ${escapeHtml(depositMethodLabel(quote.depositPaidMethod))}
+                          ${
+                            quote.depositPaidAt
+                              ? ` · ${escapeHtml(formatDateTime(quote.depositPaidAt) || formatDate(quote.depositPaidAt))}`
+                              : ""
+                          }
+                        </p>
+                      </div>`;
+                  return `
+        <div class="quote-sheet__pay quote-sheet__pay--complete">
+          <span class="invoice-sheet__label">Deposit received</span>
+          <p class="muted" style="margin:0.35rem 0 0">
+            ${escapeHtml(formatMoneyExact(paidCents || depositDueCents))} of ${escapeHtml(
+                      formatMoneyExact(chargeCents)
+                    )} investment on file. Balance is invoiced later.
+          </p>
+          <div class="quote-sheet__pay-grid">${rows}</div>
+          ${
+            quote.signedName
+              ? `<p class="muted" style="margin:0.75rem 0 0">Signed by <strong>${escapeHtml(
+                  quote.signedName
+                )}</strong>${
+                  quote.signedAt
+                    ? ` · ${escapeHtml(formatDateTime(quote.signedAt) || formatDate(quote.signedAt))}`
+                    : ""
+                }</p>`
+              : ""
+          }
+        </div>`;
+                }
+                return `
+        <div class="quote-sheet__pay quote-sheet__pay--complete">
+          <span class="invoice-sheet__label">Approved — deposit pending</span>
+          <p class="muted" style="margin:0.35rem 0 0">
+            Quote is signed${
+              quote.signedName ? ` by <strong>${escapeHtml(quote.signedName)}</strong>` : ""
+            }${
+              quote.signedAt
+                ? ` · ${escapeHtml(formatDateTime(quote.signedAt) || formatDate(quote.signedAt))}`
+                : ""
+            }. Kickoff deposit of ${escapeHtml(formatMoneyExact(depositDueCents))} not received yet.
+          </p>
+        </div>`;
+              })()
+            : `
         <div class="quote-sheet__pay">
           <span class="invoice-sheet__label">Deposit due to begin</span>
           <p class="muted" style="margin:0.35rem 0 0">Kickoff deposit only (${escapeHtml(
@@ -5895,7 +6020,8 @@
               )}). Use <strong>Copy pay link</strong> / Send for the card checkout URL.</p>
             </div>
           </div>
-        </div>
+        </div>`
+        }
         <footer class="invoice-sheet__foot">
           Questions? Write <strong>${escapeHtml(COMPANY.email)}</strong>.
           — ${escapeHtml(COMPANY.name)} · ${escapeHtml(COMPANY.web)}
@@ -5909,6 +6035,23 @@
     if (!draft) {
       els.quotePreview.innerHTML = "";
       return;
+    }
+    const head = els.quotePreview.closest(".invoice-preview-wrap")?.querySelector(".invoice-preview-wrap__head");
+    if (head) {
+      const title = head.querySelector("h3");
+      const sub = head.querySelector(".muted");
+      const completed =
+        draft.status === "approved" ||
+        draft.alreadyPaid ||
+        (Number(draft.depositPaidCents) || 0) > 0;
+      if (title) title.textContent = completed ? "Completed quote" : "Letterhead preview";
+      if (sub) {
+        sub.textContent = completed
+          ? draft.alreadyPaid || (Number(draft.depositPaidCents) || 0) > 0
+            ? "Signed and deposit on file"
+            : "Signed — deposit still pending"
+          : "What the client receives";
+      }
     }
     els.quotePreview.innerHTML = renderQuoteDocumentHtml(draft);
   }
@@ -6012,16 +6155,56 @@
       return;
     }
     if (quote.hasSignature || (quote.status === "approved" && quote.signedName)) {
+      const paidCents = Number(quote.depositPaidCents) || 0;
+      const payments = Array.isArray(quote.deposits) ? quote.deposits : [];
+      const payBlock =
+        paidCents > 0
+          ? `<div class="quote-signature-panel__pay">
+              <p><strong>Deposit received · ${escapeHtml(formatMoneyExact(paidCents))}</strong></p>
+              ${
+                payments.length
+                  ? `<ul class="quote-signature-panel__pay-list">${payments
+                      .map(
+                        (dep) => `<li>${escapeHtml(depositMethodLabel(dep.method))} · ${escapeHtml(
+                          formatMoneyExact(dep.amountCents)
+                        )} · ${escapeHtml(
+                          formatDateTime(dep.createdAt) || formatDate(dep.createdAt) || "—"
+                        )}${
+                          dep.feeCents
+                            ? ` <span class="muted">(fee ${escapeHtml(formatMoneyExact(dep.feeCents))})</span>`
+                            : ""
+                        }</li>`
+                      )
+                      .join("")}</ul>`
+                  : `<p class="field-help">${escapeHtml(depositMethodLabel(quote.depositPaidMethod))}${
+                      quote.depositPaidAt
+                        ? ` · ${escapeHtml(
+                            formatDateTime(quote.depositPaidAt) || formatDate(quote.depositPaidAt)
+                          )}`
+                        : ""
+                    }</p>`
+              }
+            </div>`
+          : quote.status === "approved"
+            ? `<p class="field-help quote-signature-panel__pay-pending">Deposit not received yet (due ${escapeHtml(
+                formatMoneyExact(
+                  quote.depositDueCents != null
+                    ? quote.depositDueCents
+                    : defaultQuoteDepositCents(quote.amountCents || 0)
+                )
+              )}).</p>`
+            : "";
       panel.innerHTML = `
         <p><strong>Signed by ${escapeHtml(quote.signedName || "Client")}</strong>
-        ${quote.signedAt ? ` · ${escapeHtml(formatDate(quote.signedAt))}` : ""}</p>
+        ${quote.signedAt ? ` · ${escapeHtml(formatDateTime(quote.signedAt) || formatDate(quote.signedAt))}` : ""}</p>
         ${
           quote.signaturePng
             ? `<div class="quote-signature-panel__img"><img src="${escapeHtml(
                 quote.signaturePng
               )}" alt="Client signature" /></div>`
             : `<p class="field-help">Signature on file.</p>`
-        }`;
+        }
+        ${payBlock}`;
       return;
     }
     if (quote.awaitingSignature || quote.status === "sent" || quote.status === "revisions_requested") {
@@ -6053,7 +6236,18 @@
       /* use list payload */
     }
     els.quoteDrawerTitle.textContent = quote.number;
-    els.quoteDrawerMeta.textContent = statusMeta(QUOTE_STATUSES, quote.status).label;
+    {
+      const paidCents = Number(quote.depositPaidCents) || 0;
+      const statusLabel = statusMeta(QUOTE_STATUSES, quote.status).label;
+      els.quoteDrawerMeta.textContent =
+        paidCents > 0
+          ? `${statusLabel} · deposit ${formatMoneyExact(paidCents)} received${
+              quote.depositPaidAt
+                ? ` · ${formatDateTime(quote.depositPaidAt) || formatDate(quote.depositPaidAt)}`
+                : ""
+            }`
+          : statusLabel;
+    }
     els.quoteForm.id.value = quote.id;
     els.quoteForm.number.value = quote.number || "";
     els.quoteForm.title.value = quote.title || "";
@@ -6100,6 +6294,7 @@
     renderQuoteAttachments(quote.documentIds || []);
     setQuoteFiles(quote.files || []);
     renderQuoteSignaturePanel(quote);
+    syncQuoteClientPreviewButton(quote);
     refreshQuotePreview();
     openOnly(els.quoteDrawer, { create: false, deleteBtn: els.deleteQuote });
     writeAppRoute("quotes", id);
@@ -6130,6 +6325,7 @@
     renderQuoteAttachments(defaultQuoteDocumentIds());
     setQuoteFiles([]);
     renderQuoteSignaturePanel(null);
+    syncQuoteClientPreviewButton(null);
     refreshQuotePreview();
     openOnly(els.quoteDrawer, { create: true, deleteBtn: els.deleteQuote });
     setTimeout(() => {
@@ -7231,6 +7427,15 @@
   els.copyQuotePayLink?.addEventListener("click", () => copyPayLink("quote"));
   els.copyInvoicePayLink?.addEventListener("click", () => copyPayLink("invoice"));
 
+  els.previewQuoteClient?.addEventListener("click", () => {
+    const url = els.previewQuoteClient.dataset.previewUrl || "";
+    if (!url) {
+      toast("Send the quote first to get a client preview link");
+      return;
+    }
+    window.open(url, "_blank", "noopener,noreferrer");
+  });
+
   els.sendQuote?.addEventListener("click", async () => {
     const sendBtn = els.sendQuote;
     sendBtn.disabled = true;
@@ -7238,6 +7443,14 @@
       const draft = collectQuoteDraft();
       if (!draft?.leadId) {
         toast("Link a client before sending");
+        return;
+      }
+      if (draft.status === "approved" || draft.alreadyPaid || (Number(draft.depositPaidCents) || 0) > 0) {
+        toast("Already approved/paid — don’t Send again. Use Copy pay link if needed.");
+        return;
+      }
+      if (draft.status === "declined") {
+        toast("Declined quotes can’t be resent — create a new quote");
         return;
       }
       const lead = state.leads.find((l) => l.id === draft.leadId);
@@ -7259,6 +7472,7 @@
       els.quoteDrawerMeta.textContent = statusMeta(QUOTE_STATUSES, data.quote.status).label;
       renderQuoteAttachments(data.quote.documentIds || []);
       renderQuoteSignaturePanel(data.quote);
+      syncQuoteClientPreviewButton(data.quote);
       refreshQuotePreview();
       const n = (data.documents || []).length;
       const channel = data.delivery?.channel;

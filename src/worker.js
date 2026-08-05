@@ -2765,6 +2765,7 @@ function rowToQuote(row, { includeSignature = false } = {}) {
     signedAt: row.signed_at || null,
     signedName: row.signed_name || "",
     clientViewedAt: row.client_viewed_at || null,
+    signToken: row.sign_token || "",
     hasSignature,
     awaitingSignature:
       (row.status === "sent" || row.status === "revisions_requested") && !hasSignature,
@@ -3095,7 +3096,8 @@ async function enrichQuote(env, quote) {
   if (!quote) return null;
   const documentIds = await getQuoteDocumentIds(env, quote.id);
   const files = await listQuoteFiles(env, quote.id);
-  return { ...quote, documentIds, files };
+  const deposits = await listDepositsForQuote(env, quote.id);
+  return { ...quote, documentIds, files, ...quoteDepositPaymentSummary(deposits) };
 }
 
 const QUOTE_FILE_MAX_BYTES = 12 * 1024 * 1024;
@@ -3499,16 +3501,16 @@ function buildQuoteLetterheadHtml(
             signUrl
               ? `<div style="margin-top:28px;">
                   <a href="${escapeHtmlText(signUrl)}" style="display:block;width:100%;box-sizing:border-box;padding:14px 16px;background:#b8953e;color:#141820;text-decoration:none;font-weight:700;font-size:15px;border-radius:10px;text-align:center;">Review &amp; sign to approve</a>
-                  <p style="margin:12px 0 0;font-size:12px;color:#5c6570;line-height:1.5;text-align:center;">This quote needs your signature before we start.</p>
+                  <p style="margin:12px 0 0;font-size:12px;color:#5c6570;line-height:1.5;text-align:center;">Please sign first — then you can pay the kickoff deposit.</p>
                 </div>`
               : ""
           }
           ${paymentInstructionsBlock({
             baseCents: quoteDepositDueCents(quote),
-            payUrl,
+            payUrl: "",
             number: quote.number,
-            heading: "Deposit due to begin",
-            blurb: "This is your kickoff deposit only — the balance is invoiced later.",
+            heading: "After you sign — deposit due to begin",
+            blurb: "Sign above first. Then pay your kickoff deposit (balance is invoiced later). Card payments include 3.5% processing.",
             etransferTitle: "Pay deposit via e-Transfer",
             cardTitle: "Pay deposit by card",
             buttonLabel: "Pay deposit by card",
@@ -3550,13 +3552,15 @@ function buildQuotePlainText(quote, documents = [], { signUrl = "", payUrl = "" 
     quote.terms ? `\nTerms & conditions:\n${quote.terms}` : "",
     quote.addendums ? `\nAddendums:\n${quote.addendums}` : "",
     docs ? `\nAttached:\n${docs}` : "",
-    signUrl ? `\nReview & sign to approve:\n${signUrl}\n\nThis quote needs your signature before we start.` : "",
+    signUrl
+      ? `\nReview & sign to approve:\n${signUrl}\n\nPlease sign first — then you can pay the kickoff deposit.`
+      : "",
     `\n${paymentInstructionsBlock({
       baseCents: quoteDepositDueCents(quote),
-      payUrl,
+      payUrl: "",
       number: quote.number,
-      heading: "Deposit due to begin",
-      blurb: "This is your kickoff deposit only — the balance is invoiced later.",
+      heading: "After you sign — deposit due to begin",
+      blurb: "Sign above first. Then pay your kickoff deposit (balance is invoiced later). Card payments include 3.5% processing.",
       etransferTitle: "Pay deposit via e-Transfer",
       cardTitle: "Pay deposit by card",
       buttonLabel: "Pay deposit by card",
@@ -4276,6 +4280,64 @@ async function availableDepositCents(env, leadId) {
   }
 }
 
+async function listDepositsForQuote(env, quoteId) {
+  if (!quoteId) return [];
+  try {
+    const result = await env.DB.prepare(
+      `SELECT * FROM client_deposits
+       WHERE quote_id = ? AND status IN ('received', 'applied')
+       ORDER BY created_at ASC`
+    )
+      .bind(quoteId)
+      .all();
+    return (result.results || []).map(rowToDeposit);
+  } catch {
+    return [];
+  }
+}
+
+async function listDepositSummariesByQuoteIds(env, quoteIds = []) {
+  const ids = [...new Set((quoteIds || []).filter(Boolean))];
+  const map = {};
+  for (const id of ids) map[id] = [];
+  if (!ids.length) return map;
+  try {
+    const placeholders = ids.map(() => "?").join(",");
+    const result = await env.DB.prepare(
+      `SELECT * FROM client_deposits
+       WHERE quote_id IN (${placeholders}) AND status IN ('received', 'applied')
+       ORDER BY created_at ASC`
+    )
+      .bind(...ids)
+      .all();
+    for (const row of result.results || []) {
+      const dep = rowToDeposit(row);
+      if (!map[dep.quoteId]) map[dep.quoteId] = [];
+      map[dep.quoteId].push(dep);
+    }
+  } catch {
+    /* ignore */
+  }
+  return map;
+}
+
+function quoteDepositPaymentSummary(deposits = []) {
+  const paid = (deposits || []).filter((d) => d.status === "received" || d.status === "applied");
+  const depositPaidCents = paid.reduce((sum, d) => sum + (Number(d.amountCents) || 0), 0);
+  const depositFeeCents = paid.reduce((sum, d) => sum + (Number(d.feeCents) || 0), 0);
+  const latest = paid.length ? paid[paid.length - 1] : null;
+  const first = paid.length ? paid[0] : null;
+  return {
+    deposits: paid,
+    depositPaidCents,
+    depositFeeCents,
+    depositPaidAt: first?.createdAt || null,
+    depositPaidLatestAt: latest?.createdAt || null,
+    depositPaidMethod: latest?.method || "",
+    alreadyPaid: depositPaidCents > 0,
+  };
+}
+
 async function quoteHasActiveDeposit(env, quoteId) {
   if (!quoteId) return false;
   try {
@@ -4575,15 +4637,18 @@ async function createStripeCheckoutSession(env, {
   title,
   successUrl,
   cancelUrl,
+  customerEmail = "",
 }) {
   const base = Math.max(0, Math.round(Number(baseCents) || 0));
   if (base < 50) return { error: "Amount is too small to charge by card.", status: 400 };
   const total = cardTotalCents(base);
   const fee = cardFeeCents(base);
+  const email = cleanText(customerEmail, 160).toLowerCase();
   const result = await stripeRequest(env, "/checkout/sessions", {
     mode: "payment",
     success_url: successUrl,
     cancel_url: cancelUrl,
+    ...(email.includes("@") ? { customer_email: email } : {}),
     "line_items[0][quantity]": "1",
     "line_items[0][price_data][currency]": "cad",
     "line_items[0][price_data][unit_amount]": String(total),
@@ -4600,6 +4665,196 @@ async function createStripeCheckoutSession(env, {
   });
   if (result.error) return result;
   return { session: result.data, baseCents: base, feeCents: fee, totalCents: total };
+}
+
+function stripeCheckoutCustomerEmail(session) {
+  return cleanText(
+    session?.customer_details?.email || session?.customer_email || "",
+    160
+  ).toLowerCase();
+}
+
+function buildPaymentReceiptEmail({
+  kind,
+  number,
+  title,
+  clientName,
+  baseCents,
+  feeCents,
+  totalCents,
+  paymentRef = "",
+  paidAt = "",
+}) {
+  const isInvoice = kind === "invoice";
+  const label = isInvoice ? "Invoice payment" : "Deposit payment";
+  const kicker = isInvoice ? "Receipt" : "Deposit receipt";
+  const when = paidAt
+    ? (() => {
+        try {
+          return new Intl.DateTimeFormat("en-CA", {
+            dateStyle: "medium",
+            timeStyle: "short",
+            timeZone: "America/Vancouver",
+          }).format(new Date(paidAt));
+        } catch {
+          return paidAt;
+        }
+      })()
+    : "";
+  const header = emailBrandHeaderHtml({
+    logoUrl: "cid:vds-logo",
+    kicker,
+    number: number || "",
+    detailHtml: when ? `Paid ${escapeHtmlText(when)}` : "Payment received",
+  });
+  const html = `<!DOCTYPE html>
+<html><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /></head>
+<body style="margin:0;padding:0;background:#eef1f5;color:#1c2430;">
+  <div style="max-width:640px;margin:0 auto;padding:16px 12px;font-family:Segoe UI,Helvetica,Arial,sans-serif;">
+    <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="background:#ffffff;border:1px solid #d7dde6;border-radius:12px;overflow:hidden;">
+      <tr><td>${header}</td></tr>
+      <tr>
+        <td style="padding:24px 20px;">
+          <p style="margin:0;font-size:15px;line-height:1.55;color:#3a424c;">
+            Hi${clientName ? ` ${escapeHtmlText(clientName)}` : ""},
+          </p>
+          <p style="margin:12px 0 0;font-size:15px;line-height:1.55;color:#3a424c;">
+            Thank you — we received your card payment for
+            <strong style="color:#1c2430;">${escapeHtmlText(title || label)} (${escapeHtmlText(number || "")})</strong>.
+          </p>
+          <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="margin:20px 0 0;background:#f7f2e8;border:1px solid #e0d6c4;border-radius:12px;">
+            <tr><td style="padding:16px;">
+              <div style="font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:#8a7340;font-weight:700;">Amount charged</div>
+              <div style="margin-top:8px;font-size:28px;font-weight:700;color:#1c2430;">${escapeHtmlText(formatCadCents(totalCents))}</div>
+              <p style="margin:12px 0 0;font-size:13px;line-height:1.55;color:#3a424c;">
+                ${isInvoice ? "Invoice balance" : "Deposit"}: ${escapeHtmlText(formatCadCents(baseCents))}<br/>
+                Card processing (3.5%): ${escapeHtmlText(formatCadCents(feeCents))}
+              </p>
+              ${
+                paymentRef
+                  ? `<p style="margin:10px 0 0;font-size:12px;color:#5c6570;">Reference: ${escapeHtmlText(paymentRef)}</p>`
+                  : ""
+              }
+            </td></tr>
+          </table>
+          <p style="margin:18px 0 0;font-size:13px;line-height:1.55;color:#5c6570;">
+            ${
+              isInvoice
+                ? "This invoice is marked paid in our records."
+                : "This kickoff deposit is on file. The balance will be invoiced separately."
+            }
+          </p>
+          <div style="margin-top:24px;padding-top:14px;border-top:1px solid #e6e1d6;font-size:12px;color:#5c6570;line-height:1.55;">
+            Questions? Write <strong style="color:#1c2430;">${escapeHtmlText(COMPANY.email)}</strong>.<br/>
+            — ${escapeHtmlText(COMPANY.name)} · ${escapeHtmlText(COMPANY.web)}
+          </div>
+        </td>
+      </tr>
+    </table>
+  </div>
+</body></html>`;
+  const text = [
+    `${COMPANY.name} — ${label} receipt`,
+    "",
+    `Hi${clientName ? ` ${clientName}` : ""},`,
+    "",
+    `Thank you — we received your card payment for ${title || label} (${number || ""}).`,
+    "",
+    `Amount charged: ${formatCadCents(totalCents)}`,
+    `${isInvoice ? "Invoice balance" : "Deposit"}: ${formatCadCents(baseCents)}`,
+    `Card processing (3.5%): ${formatCadCents(feeCents)}`,
+    paymentRef ? `Reference: ${paymentRef}` : "",
+    when ? `Paid: ${when}` : "",
+    "",
+    isInvoice
+      ? "This invoice is marked paid in our records."
+      : "This kickoff deposit is on file. The balance will be invoiced separately.",
+    "",
+    `Questions? ${COMPANY.email}`,
+    `— ${COMPANY.name}`,
+  ]
+    .filter((line) => line !== "")
+    .join("\n");
+  return {
+    subject: `Receipt · ${number || label} · ${formatCadCents(totalCents)}`,
+    html,
+    text,
+  };
+}
+
+async function sendCardPaymentReceipt(env, {
+  session,
+  kind,
+  number,
+  title,
+  clientName,
+  leadId,
+  billToEmail = "",
+  baseCents,
+  feeCents,
+}) {
+  const totalCents =
+    Math.max(0, Math.round(Number(session?.amount_total) || 0)) || cardTotalCents(baseCents);
+  const fee = Math.max(0, Math.round(Number(feeCents) || cardFeeCents(baseCents)));
+  const base = Math.max(0, Math.round(Number(baseCents) || 0));
+  let toEmail = stripeCheckoutCustomerEmail(session);
+  if (!toEmail.includes("@") && billToEmail) toEmail = cleanText(billToEmail, 160).toLowerCase();
+  if (!toEmail.includes("@") && leadId) {
+    const lead = await getLead(env, leadId);
+    toEmail = cleanText(lead?.email || "", 160).toLowerCase();
+  }
+  if (!toEmail.includes("@")) {
+    return { status: "skipped", error: "No recipient email for receipt." };
+  }
+  const receipt = buildPaymentReceiptEmail({
+    kind,
+    number,
+    title,
+    clientName: clientName || session?.customer_details?.name || "",
+    baseCents: base,
+    feeCents: fee,
+    totalCents,
+    paymentRef:
+      (typeof session?.payment_intent === "string"
+        ? session.payment_intent
+        : session?.payment_intent?.id) ||
+      session?.id ||
+      "",
+    paidAt: session?.created
+      ? new Date(Number(session.created) * 1000).toISOString()
+      : nowIso(),
+  });
+  const logo = await logoInlineAttachment(env);
+  const delivery = await deliverReminder(env, {
+    toEmail,
+    subject: receipt.subject,
+    body: receipt.text,
+    html: receipt.html,
+    attachments: logo ? [logo] : undefined,
+  });
+
+  // Owner copy (best-effort)
+  const ownerEmail = cleanText(
+    env.CRM_OWNER_EMAIL || COMPANY.email || "",
+    160
+  ).toLowerCase();
+  if (ownerEmail && ownerEmail !== toEmail) {
+    await deliverReminder(env, {
+      toEmail: ownerEmail,
+      subject: `Paid · ${number || kind} · ${formatCadCents(totalCents)}`,
+      body: [
+        `Card payment received from ${clientName || toEmail}.`,
+        "",
+        `Type: ${kind === "invoice" ? "Invoice" : "Quote deposit"}`,
+        `Number: ${number || "—"}`,
+        `Charged: ${formatCadCents(totalCents)} (base ${formatCadCents(base)} + fee ${formatCadCents(fee)})`,
+        `Client email: ${toEmail}`,
+        "",
+        `— ${COMPANY.name}`,
+      ].join("\n"),
+    }).catch(() => null);
+  }
+  return { ...delivery, toEmail };
 }
 
 async function verifyStripeWebhook(env, rawBody, signatureHeader) {
@@ -4709,30 +4964,53 @@ async function handleStripeCheckoutCompleted(env, session) {
     const quote = await getQuote(env, entityId);
     if (!quote?.leadId) return { error: "Quote not found for payment.", status: 404 };
     const already = await quoteHasActiveDeposit(env, quote.id);
+    if (already) {
+      // Don't silently accept a second deposit charge for the same quote.
+      await recordActivity(env, quote.leadId, {
+        kind: "payment",
+        entityType: "quote",
+        entityId: quote.id,
+        summary: `Duplicate card checkout ignored · quote ${quote.number} already had a deposit (${formatCadCents(baseCents)})`,
+        meta: { method: "card", sessionId, paymentIntent, duplicate: true },
+        at: nowIso(),
+      }).catch(() => null);
+      return { ok: true, duplicate: true, reason: "quote_already_has_deposit" };
+    }
     const deposit = await insertDeposit(env, {
       leadId: quote.leadId,
-      quoteId: already ? null : quote.id,
+      quoteId: quote.id,
       amountCents: baseCents || quote.amountCents,
       feeCents,
       method: "card",
       status: "received",
       stripeSessionId: sessionId,
       stripePaymentIntent: paymentIntent,
-      note: already
-        ? `Additional card payment (quote ${quote.number} already had a deposit)`
-        : `Card deposit for quote ${quote.number}`,
+      note: `Card deposit for quote ${quote.number}`,
     });
     await recordActivity(env, quote.leadId, {
       kind: "payment",
       entityType: "quote",
       entityId: quote.id,
-      summary: already
-        ? `Additional card credit · ${formatCadCents(deposit.amountCents)}`
-        : `Card deposit received · ${formatCadCents(deposit.amountCents)} (fee ${formatCadCents(deposit.feeCents)})`,
-      meta: { depositId: deposit.id, method: "card", sessionId, additional: already },
+      summary: `Card deposit received · ${formatCadCents(deposit.amountCents)} (fee ${formatCadCents(deposit.feeCents)})`,
+      meta: { depositId: deposit.id, method: "card", sessionId },
       at: nowIso(),
     });
-    return { ok: true, deposit };
+    let receipt = null;
+    try {
+      receipt = await sendCardPaymentReceipt(env, {
+        session,
+        kind: "quote",
+        number: quote.number,
+        title: quote.title,
+        clientName: quote.clientName,
+        leadId: quote.leadId,
+        baseCents: deposit.amountCents,
+        feeCents: deposit.feeCents,
+      });
+    } catch (err) {
+      receipt = { status: "failed", error: String(err?.message || err) };
+    }
+    return { ok: true, deposit, receipt };
   }
 
   if (kind === "invoice") {
@@ -4758,7 +5036,23 @@ async function handleStripeCheckoutCompleted(env, session) {
         meta: { depositId: credit.id, method: "card", sessionId, overpay: true },
         at: nowIso(),
       });
-      return { ok: true, overpay: true, deposit: credit };
+      let receipt = null;
+      try {
+        receipt = await sendCardPaymentReceipt(env, {
+          session,
+          kind: "invoice",
+          number: invoice.number,
+          title: invoice.title,
+          clientName: invoice.clientName || invoice.billToName,
+          leadId: invoice.leadId,
+          billToEmail: invoice.billToEmail,
+          baseCents: credit.amountCents,
+          feeCents: credit.feeCents,
+        });
+      } catch (err) {
+        receipt = { status: "failed", error: String(err?.message || err) };
+      }
+      return { ok: true, overpay: true, deposit: credit, receipt };
     }
 
     const appliedFromDeposits = await applyReceivedDepositsToInvoice(
@@ -4815,7 +5109,23 @@ async function handleStripeCheckoutCompleted(env, session) {
       meta: { method: "card", sessionId },
       at: nowIso(),
     });
-    return { ok: true };
+    let receipt = null;
+    try {
+      receipt = await sendCardPaymentReceipt(env, {
+        session,
+        kind: "invoice",
+        number: invoice.number,
+        title: invoice.title,
+        clientName: invoice.clientName || invoice.billToName,
+        leadId: invoice.leadId,
+        billToEmail: invoice.billToEmail,
+        baseCents,
+        feeCents,
+      });
+    } catch (err) {
+      receipt = { status: "failed", error: String(err?.message || err) };
+    }
+    return { ok: true, receipt };
   }
 
   return { error: "Unknown payment kind.", status: 400 };
@@ -4844,13 +5154,16 @@ async function settleInvoiceIfCoveredByDeposits(env, invoice) {
   return getInvoice(env, invoice.id);
 }
 
-async function publicPayPreview(env, kind, token) {
+async function publicPayPreview(env, kind, token, requestUrl = "") {
   if (kind === "quote") {
     const row = await getQuoteByPayToken(env, token);
     if (!row) return { error: "This payment link is invalid or expired.", status: 404 };
     const quote = rowToQuote(row);
     const depositDueCents = quote.depositDueCents || quoteDepositDueCents(quote);
     const alreadyPaid = await quoteHasActiveDeposit(env, quote.id);
+    const origin = publicAppOrigin(env, requestUrl);
+    const signToken = cleanText(row.sign_token || "", 80);
+    const signUrl = origin && signToken ? `${origin}/sign/q/${encodeURIComponent(signToken)}` : "";
     return {
       kind: "quote",
       number: quote.number,
@@ -4864,6 +5177,8 @@ async function publicPayPreview(env, kind, token) {
       cardTotalCents: cardTotalCents(depositDueCents),
       accountingEmail: COMPANY.accountingEmail,
       alreadyPaid,
+      needsSignature: quote.status !== "approved" && quote.status !== "declined",
+      signUrl,
       company: {
         name: COMPANY.name,
         email: COMPANY.email,
@@ -4908,7 +5223,7 @@ async function publicPayPreview(env, kind, token) {
 async function startPublicCheckout(env, body, requestUrl) {
   const kind = cleanText(body.kind, 20);
   const token = cleanText(body.token, 80);
-  const preview = await publicPayPreview(env, kind, token);
+  const preview = await publicPayPreview(env, kind, token, requestUrl);
   if (preview.error) return preview;
   if (preview.alreadyPaid) {
     return { error: "This is already paid — nothing left to charge.", status: 400 };
@@ -4921,11 +5236,23 @@ async function startPublicCheckout(env, body, requestUrl) {
 
   let entityId = "";
   let leadId = "";
+  let signToken = "";
   if (kind === "quote") {
     const row = await getQuoteByPayToken(env, token);
     if (!row) return { error: "This payment link is invalid or expired.", status: 404 };
+    if (row.status !== "approved") {
+      const st = cleanText(row.sign_token || "", 80);
+      const signUrl = st ? `${origin}/sign/q/${encodeURIComponent(st)}` : "";
+      return {
+        error: "Please sign and approve this quote before paying the deposit.",
+        status: 400,
+        needsSignature: true,
+        signUrl,
+      };
+    }
     entityId = row.id;
     leadId = row.lead_id || "";
+    signToken = cleanText(row.sign_token || "", 80);
   } else {
     const row = await getInvoiceByPayToken(env, token);
     if (!row) return { error: "This payment link is invalid or expired.", status: 404 };
@@ -4936,7 +5263,15 @@ async function startPublicCheckout(env, body, requestUrl) {
     return { error: "This payment link is not linked to a client yet.", status: 400 };
   }
 
+  const lead = await getLead(env, leadId);
+  let customerEmail = cleanText(lead?.email || "", 160).toLowerCase();
+  if (kind === "invoice" && !customerEmail.includes("@")) {
+    const invoice = await getInvoice(env, entityId);
+    customerEmail = cleanText(invoice?.billToEmail || "", 160).toLowerCase();
+  }
+
   const pathPrefix = kind === "invoice" ? `/pay/i/${encodeURIComponent(token)}` : `/pay/q/${encodeURIComponent(token)}`;
+  const quoteReturn = signToken ? `${origin}/sign/q/${encodeURIComponent(signToken)}` : `${origin}${pathPrefix}`;
   const session = await createStripeCheckoutSession(env, {
     kind,
     entityId,
@@ -4944,8 +5279,9 @@ async function startPublicCheckout(env, body, requestUrl) {
     baseCents: preview.baseCents,
     number: preview.number,
     title: preview.title,
-    successUrl: `${origin}${pathPrefix}?paid=1`,
-    cancelUrl: `${origin}${pathPrefix}?cancelled=1`,
+    customerEmail,
+    successUrl: kind === "quote" ? `${quoteReturn}?paid=1` : `${origin}${pathPrefix}?paid=1`,
+    cancelUrl: kind === "quote" ? `${quoteReturn}?cancelled=1` : `${origin}${pathPrefix}?cancelled=1`,
   });
   if (session.error) return session;
   return { url: session.session.url, sessionId: session.session.id };
@@ -5341,10 +5677,15 @@ async function listQuotes(env, { status } = {}) {
     env,
     quotes.map((quote) => quote.id)
   );
+  const depositsByQuote = await listDepositSummariesByQuoteIds(
+    env,
+    quotes.map((quote) => quote.id)
+  );
   return quotes.map((quote) => ({
     ...quote,
     documentIds: byQuote[quote.id] || [],
     files: filesByQuote[quote.id] || [],
+    ...quoteDepositPaymentSummary(depositsByQuote[quote.id] || []),
   }));
 }
 
@@ -5354,25 +5695,42 @@ async function getQuote(env, id) {
   return enrichQuote(env, rowToQuote(row, { includeSignature: true }));
 }
 
-async function issueQuoteSignToken(env, quoteId) {
+async function issueQuoteSignToken(env, quoteId, { resetSignature = true } = {}) {
   const token = newSignToken();
   const ts = nowIso();
   try {
-    await env.DB.prepare(
-      `UPDATE quotes SET
-        sign_token = ?, sign_token_created_at = ?,
-        signed_at = NULL, signed_name = '', signature_png = NULL,
-        signed_ip = NULL, signed_user_agent = NULL,
-        updated_at = ?
-       WHERE id = ?`
-    )
-      .bind(token, ts, ts, quoteId)
-      .run();
+    if (resetSignature) {
+      await env.DB.prepare(
+        `UPDATE quotes SET
+          sign_token = ?, sign_token_created_at = ?,
+          signed_at = NULL, signed_name = '', signature_png = NULL,
+          signed_ip = NULL, signed_user_agent = NULL,
+          updated_at = ?
+         WHERE id = ?`
+      )
+        .bind(token, ts, ts, quoteId)
+        .run();
+    } else {
+      await env.DB.prepare(
+        `UPDATE quotes SET
+          sign_token = ?, sign_token_created_at = ?, updated_at = ?
+         WHERE id = ?`
+      )
+        .bind(token, ts, ts, quoteId)
+        .run();
+    }
   } catch {
     // Columns missing until migration 0019.
     return null;
   }
   return token;
+}
+
+/** Keep existing sign token when present; never wipe a completed signature. */
+async function ensureQuoteSignToken(env, quote) {
+  const existing = cleanText(quote?.signToken || quote?.sign_token || "", 80);
+  if (existing) return existing;
+  return issueQuoteSignToken(env, quote.id, { resetSignature: false });
 }
 
 function isValidSignaturePng(dataUrl) {
@@ -5393,7 +5751,7 @@ async function getQuoteBySignToken(env, token) {
   }
 }
 
-function publicQuotePayload(row, { payUrl = "" } = {}) {
+function publicQuotePayload(row, { payUrl = "", signUrl = "", alreadyPaid = false } = {}) {
   const quote = rowToQuote(row, { includeSignature: true });
   const depositDueCents = quote.depositDueCents || quoteDepositDueCents(quote);
   return {
@@ -5412,6 +5770,8 @@ function publicQuotePayload(row, { payUrl = "" } = {}) {
     cardTotalCents: cardTotalCents(depositDueCents),
     cardTotalLabel: formatCadCents(cardTotalCents(depositDueCents)),
     payUrl: payUrl || "",
+    signUrl: signUrl || "",
+    alreadyPaid: Boolean(alreadyPaid),
     accountingEmail: COMPANY.accountingEmail,
     lineItems: quote.lineItems || [],
     notes: quote.notes,
@@ -5527,7 +5887,10 @@ async function publicQuotePayloadWithPay(env, row, requestUrl = "") {
   const payToken = row.pay_token || (await issueEntityPayToken(env, "quotes", row.id));
   const origin = publicAppOrigin(env, requestUrl);
   const payUrl = origin && payToken ? `${origin}/pay/q/${encodeURIComponent(payToken)}` : "";
-  return publicQuotePayload(row, { payUrl });
+  const signToken = cleanText(row.sign_token || "", 80);
+  const signUrl = origin && signToken ? `${origin}/sign/q/${encodeURIComponent(signToken)}` : "";
+  const alreadyPaid = await quoteHasActiveDeposit(env, row.id);
+  return publicQuotePayload(row, { payUrl, signUrl, alreadyPaid });
 }
 
 async function signQuotePublic(env, body, request) {
@@ -5870,13 +6233,34 @@ async function sendQuote(env, id, requestUrl, senderUser = null) {
   if (!quote.leadId) {
     return { error: "Link a client before sending this quote.", status: 400 };
   }
+  if (quote.status === "approved") {
+    return {
+      error:
+        "This quote is already approved and signed. Don’t Send again — that would reopen signing. Use Copy pay link if they still need to pay.",
+      status: 400,
+    };
+  }
+  if (quote.status === "declined") {
+    return {
+      error: "This quote was declined. Duplicate it or create a new quote to send another offer.",
+      status: 400,
+    };
+  }
+  if (quote.alreadyPaid || (Number(quote.depositPaidCents) || 0) > 0) {
+    return {
+      error: "A deposit is already on file for this quote. Don’t Send again.",
+      status: 400,
+    };
+  }
   const lead = await env.DB.prepare("SELECT * FROM leads WHERE id = ?").bind(quote.leadId).first();
   const toEmail = cleanText(lead?.email || "", 160).toLowerCase();
   if (!toEmail) {
     return { error: "Add an email on the client before sending the quote.", status: 400 };
   }
 
-  const signToken = await issueQuoteSignToken(env, id);
+  // Reuse the existing sign token on resend so older email links keep working.
+  // Never clear a signature here (approved is blocked above).
+  const signToken = await ensureQuoteSignToken(env, quote);
   if (!signToken) {
     return {
       error: "Quote signing is not ready yet. Apply database migrations and try again.",
@@ -7013,10 +7397,7 @@ async function handleApi(request, env) {
     let row = await getQuoteBySignToken(env, token);
     if (!row) return json({ error: "This signing link is invalid or expired." }, { status: 404 });
     row = (await markQuoteClientViewed(env, row)) || row;
-    const payToken = row.pay_token || (await issueEntityPayToken(env, "quotes", row.id));
-    const origin = publicAppOrigin(env, request.url);
-    const payUrl = payToken ? `${origin}/pay/q/${encodeURIComponent(payToken)}` : "";
-    return json({ quote: publicQuotePayload(row, { payUrl }) });
+    return json({ quote: await publicQuotePayloadWithPay(env, row, request.url) });
   }
 
   if (path === "/api/public/quotes/sign" && method === "POST") {
@@ -7034,13 +7415,13 @@ async function handleApi(request, env) {
   }
 
   if (path === "/api/public/pay/quote" && method === "GET") {
-    const result = await publicPayPreview(env, "quote", url.searchParams.get("token") || "");
+    const result = await publicPayPreview(env, "quote", url.searchParams.get("token") || "", request.url);
     if (result.error) return json({ error: result.error }, { status: result.status || 400 });
     return json({ pay: result });
   }
 
   if (path === "/api/public/pay/invoice" && method === "GET") {
-    const result = await publicPayPreview(env, "invoice", url.searchParams.get("token") || "");
+    const result = await publicPayPreview(env, "invoice", url.searchParams.get("token") || "", request.url);
     if (result.error) return json({ error: result.error }, { status: result.status || 400 });
     return json({ pay: result });
   }
@@ -7053,7 +7434,16 @@ async function handleApi(request, env) {
       return badRequest("Invalid JSON body.");
     }
     const result = await startPublicCheckout(env, body, request.url);
-    if (result.error) return json({ error: result.error }, { status: result.status || 400 });
+    if (result.error) {
+      return json(
+        {
+          error: result.error,
+          needsSignature: Boolean(result.needsSignature),
+          signUrl: result.signUrl || "",
+        },
+        { status: result.status || 400 }
+      );
+    }
     return json(result);
   }
 

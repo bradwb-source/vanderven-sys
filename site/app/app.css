@@ -2957,6 +2957,33 @@ body.is-dragging-job .unscheduled-list {
   height: auto;
 }
 
+.quote-signature-panel__pay {
+  margin-top: 0.85rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(244, 241, 234, 0.1);
+}
+
+.quote-signature-panel__pay p {
+  margin: 0;
+}
+
+.quote-signature-panel__pay-list {
+  margin: 0.4rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.quote-signature-panel__pay-pending {
+  margin-top: 0.75rem !important;
+  color: #d4b56a;
+}
+
+.quote-sheet__pay--complete .invoice-sheet__label {
+  color: #2f6b4f;
+}
+
 .client-deposits {
   margin: 0 0 1.25rem;
 }

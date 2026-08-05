@@ -340,7 +340,14 @@
         line-height: 1.45;
         color: var(--muted);
       }
-      .pay-option .btn { width: 100%; margin-top: 0.85rem; }
+      .pay-option .btn {
+        display: block;
+        width: 100%;
+        box-sizing: border-box;
+        margin-top: 0.85rem;
+        text-align: center;
+        text-decoration: none;
+      }
       [hidden] { display: none !important; }
     </style>
   </head>
@@ -361,11 +368,41 @@
         <p id="error-detail">This signing link is invalid or expired.</p>
       </div>
 
-      <div id="state-done" class="card status" hidden>
-        <h2 id="done-title">Thank you</h2>
-        <p id="done-detail"></p>
-        <div class="sig-preview" id="done-sig" hidden>
-          <img id="done-sig-img" alt="Signature on file" />
+      <div id="state-done" class="card" hidden>
+        <div class="status">
+          <h2 id="done-title">Thank you</h2>
+          <p id="done-detail"></p>
+          <div class="sig-preview" id="done-sig" hidden>
+            <img id="done-sig-img" alt="Signature on file" />
+          </div>
+          <p id="paid-banner" class="help" hidden style="margin-top:1rem;color:#2f6b4f;font-weight:600;"></p>
+          <p id="cancel-banner" class="help" hidden style="margin-top:1rem;color:#7a5a22;"></p>
+        </div>
+        <div class="body" id="done-pay-wrap" hidden style="border-top:1px solid var(--line);padding-top:1.25rem;">
+          <div class="pay-block" style="margin-top:0;padding-top:0;border-top:0;">
+            <h2 id="done-pay-heading">Deposit due to begin</h2>
+            <p class="help" id="done-pay-help">
+              Kickoff deposit only — balance is invoiced later. e-Transfer has no fee; card includes 3.5% processing.
+            </p>
+            <div class="pay-options" id="done-pay-options">
+              <div class="pay-option">
+                <h3>Pay via e-Transfer</h3>
+                <p class="amount" id="done-pay-etransfer-amount"></p>
+                <p class="detail">
+                  No extra fee.<br />
+                  Send Interac to <strong id="done-pay-accounting"></strong><br />
+                  Memo: <strong id="done-pay-memo"></strong>
+                </p>
+              </div>
+              <div class="pay-option">
+                <h3>Pay by card</h3>
+                <p class="amount" id="done-pay-card-amount"></p>
+                <p class="detail" id="done-pay-card-detail"></p>
+                <button type="button" class="btn btn-primary" id="done-pay-card-btn">Pay by card</button>
+                <p class="error" id="done-pay-error" hidden></p>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -396,31 +433,9 @@
             <p id="q-addendums" class="notes"></p>
           </div>
 
-          <div class="pay-block" id="q-pay-block">
-            <h2>Deposit due to begin</h2>
-            <p class="help">Kickoff deposit only — balance is invoiced later. e-Transfer has no fee; card includes 3.5% processing.</p>
-            <div class="pay-options">
-              <div class="pay-option">
-                <h3>Pay via e-Transfer</h3>
-                <p class="amount" id="q-pay-etransfer-amount"></p>
-                <p class="detail">
-                  No extra fee.<br />
-                  Send Interac to <strong id="q-pay-accounting"></strong><br />
-                  Memo: <strong id="q-pay-memo"></strong>
-                </p>
-              </div>
-              <div class="pay-option">
-                <h3>Pay by card</h3>
-                <p class="amount" id="q-pay-card-amount"></p>
-                <p class="detail" id="q-pay-card-detail"></p>
-                <a class="btn btn-primary" id="q-pay-card-btn" href="#">Pay by card</a>
-              </div>
-            </div>
-          </div>
-
-          <div class="sign-block">
+          <div class="sign-block" style="margin-top:1.35rem;padding-top:1.25rem;border-top:1px solid var(--line);">
             <h2>Approve &amp; sign</h2>
-            <p class="help">Type your name and draw your signature to approve this quote.</p>
+            <p class="help">Sign to approve first — then you’ll pay the kickoff deposit.</p>
             <p class="error" id="form-error" hidden></p>
 
             <label class="field">
@@ -455,6 +470,8 @@
     <script>
       (function () {
         const token = (location.pathname.match(/\/sign\/q\/([^/]+)\/?$/) || [])[1] || new URLSearchParams(location.search).get("token") || "";
+        const params = new URLSearchParams(location.search);
+        let currentQuote = null;
         const els = {
           loading: document.getElementById("state-loading"),
           error: document.getElementById("state-error"),
@@ -464,6 +481,19 @@
           doneDetail: document.getElementById("done-detail"),
           doneSig: document.getElementById("done-sig"),
           doneSigImg: document.getElementById("done-sig-img"),
+          paidBanner: document.getElementById("paid-banner"),
+          cancelBanner: document.getElementById("cancel-banner"),
+          donePayWrap: document.getElementById("done-pay-wrap"),
+          donePayHeading: document.getElementById("done-pay-heading"),
+          donePayHelp: document.getElementById("done-pay-help"),
+          donePayOptions: document.getElementById("done-pay-options"),
+          donePayEtransfer: document.getElementById("done-pay-etransfer-amount"),
+          donePayAccounting: document.getElementById("done-pay-accounting"),
+          donePayMemo: document.getElementById("done-pay-memo"),
+          donePayCardAmount: document.getElementById("done-pay-card-amount"),
+          donePayCardDetail: document.getElementById("done-pay-card-detail"),
+          donePayCardBtn: document.getElementById("done-pay-card-btn"),
+          donePayError: document.getElementById("done-pay-error"),
           form: document.getElementById("state-form"),
           formError: document.getElementById("form-error"),
           number: document.getElementById("q-number"),
@@ -487,6 +517,18 @@
           canvas: document.getElementById("sig-pad"),
         };
 
+        function money(cents) {
+          return ((Number(cents) || 0) / 100).toLocaleString("en-CA", {
+            style: "currency",
+            currency: "CAD",
+          });
+        }
+
+        function payTokenFromUrl(payUrl) {
+          const m = String(payUrl || "").match(/\/pay\/q\/([^/?#]+)/);
+          return m ? decodeURIComponent(m[1]) : "";
+        }
+
         function show(which) {
           els.loading.hidden = which !== "loading";
           els.error.hidden = which !== "error";
@@ -494,15 +536,76 @@
           els.form.hidden = which !== "form";
         }
 
+        function renderDonePay(quote) {
+          const depositDue =
+            Number(quote.depositDueCents) || Math.round((Number(quote.amountCents) || 0) * 0.5);
+          const approved = quote.status === "approved";
+          const confirmedPaid = Boolean(quote.alreadyPaid);
+          const pendingPaid = !confirmedPaid && params.get("paid") === "1";
+          if (!approved || depositDue <= 0) {
+            els.donePayWrap.hidden = true;
+            els.paidBanner.hidden = true;
+            return;
+          }
+          if (confirmedPaid) {
+            els.donePayWrap.hidden = true;
+            els.paidBanner.hidden = false;
+            els.paidBanner.textContent =
+              "Deposit already received — thank you. We’ll invoice the balance later.";
+            return;
+          }
+          if (pendingPaid) {
+            // Stripe returned success; wait for webhook before claiming the deposit is on file.
+            els.donePayWrap.hidden = true;
+            els.paidBanner.hidden = false;
+            els.paidBanner.textContent = "Confirming your payment… this usually takes a few seconds.";
+            return;
+          }
+          els.donePayWrap.hidden = false;
+          els.donePayOptions.hidden = false;
+          if (els.donePayHeading) els.donePayHeading.textContent = "Deposit due to begin";
+          els.donePayHelp.textContent =
+            "Kickoff deposit only — balance is invoiced later. e-Transfer has no fee; card includes 3.5% processing.";
+          const fee = Number(quote.cardFeeCents) || Math.round(depositDue * 0.035);
+          const cardTotal = Number(quote.cardTotalCents) || depositDue + fee;
+          els.donePayEtransfer.textContent = money(depositDue);
+          els.donePayAccounting.textContent =
+            quote.accountingEmail || quote.company?.accountingEmail || "accounting@vanderven.ca";
+          els.donePayMemo.textContent = quote.number || "your quote number";
+          els.donePayCardAmount.textContent = money(cardTotal);
+          els.donePayCardDetail.textContent = `${money(depositDue)} deposit + 3.5% processing (${money(fee)})`;
+          els.donePayCardBtn.hidden = !payTokenFromUrl(quote.payUrl);
+        }
+
+        async function confirmPaidIfNeeded(quote) {
+          if (!quote || quote.status !== "approved") return quote;
+          if (quote.alreadyPaid || params.get("paid") !== "1") return quote;
+          for (let i = 0; i < 8; i += 1) {
+            await new Promise((r) => setTimeout(r, 1500));
+            try {
+              const res = await fetch(`/api/public/quotes/sign-preview?token=${encodeURIComponent(token)}`);
+              const data = await res.json().catch(() => ({}));
+              if (res.ok && data.quote?.alreadyPaid) {
+                currentQuote = data.quote;
+                showDone(data.quote);
+                return data.quote;
+              }
+            } catch {
+              /* keep polling */
+            }
+          }
+          els.paidBanner.hidden = false;
+          els.paidBanner.textContent =
+            "Payment submitted. If you don’t see confirmation shortly, contact Vanderven — don’t pay again.";
+          return quote;
+        }
+
         function showDone(quote) {
+          currentQuote = quote;
           const approved = quote.status === "approved";
           els.doneTitle.textContent = approved ? "Quote approved" : "Quote declined";
-          const payHint =
-            approved && quote.payUrl
-              ? ` You can pay the deposit by card or e-Transfer here: ${quote.payUrl}`
-              : "";
           els.doneDetail.textContent = approved
-            ? `Thanks${quote.signedName ? `, ${quote.signedName}` : ""}. ${quote.number} is signed and on file with Vanderven Systems.${payHint}`
+            ? `Thanks${quote.signedName ? `, ${quote.signedName}` : ""}. ${quote.number} is signed and on file with Vanderven Systems.`
             : `${quote.number} was marked declined. You can reply to your Vanderven contact if you’d like to revisit.`;
           if (approved && quote.signaturePng) {
             els.doneSig.hidden = false;
@@ -510,6 +613,13 @@
           } else {
             els.doneSig.hidden = true;
           }
+          if (params.get("cancelled") === "1" && approved && !quote.alreadyPaid) {
+            els.cancelBanner.hidden = false;
+            els.cancelBanner.textContent = "Checkout was cancelled. You can try again below or pay by e-Transfer.";
+          } else {
+            els.cancelBanner.hidden = true;
+          }
+          renderDonePay(quote);
           show("done");
         }
 
@@ -518,11 +628,6 @@
           els.title.textContent = quote.title || "Quote";
           els.client.textContent = quote.clientName || "Client";
           els.companyTag.textContent = quote.company?.tagline || "";
-          const money = (cents) =>
-            ((Number(cents) || 0) / 100).toLocaleString("en-CA", {
-              style: "currency",
-              currency: "CAD",
-            });
           const subtotalCents = Number(quote.subtotalCents) || Number(quote.amountCents) || 0;
           const discountCents = Math.max(
             0,
@@ -554,35 +659,6 @@
             "has-breakdown",
             discountCents > 0 || Boolean(quote.discountNote)
           );
-          const payBlock = document.getElementById("q-pay-block");
-          const payEtransfer = document.getElementById("q-pay-etransfer-amount");
-          const payAccounting = document.getElementById("q-pay-accounting");
-          const payMemo = document.getElementById("q-pay-memo");
-          const payCardAmount = document.getElementById("q-pay-card-amount");
-          const payCardDetail = document.getElementById("q-pay-card-detail");
-          const payCardBtn = document.getElementById("q-pay-card-btn");
-          const depositDue =
-            Number(quote.depositDueCents) ||
-            Math.round((Number(quote.amountCents) || 0) * 0.5);
-          if (payBlock && depositDue > 0) {
-            payBlock.hidden = false;
-            const fee = Number(quote.cardFeeCents) || Math.round(depositDue * 0.035);
-            const cardTotal = Number(quote.cardTotalCents) || depositDue + fee;
-            payEtransfer.textContent = money(depositDue);
-            payAccounting.textContent =
-              quote.accountingEmail || quote.company?.accountingEmail || "accounting@vanderven.ca";
-            payMemo.textContent = quote.number || "your quote number";
-            payCardAmount.textContent = money(cardTotal);
-            payCardDetail.textContent = `${money(depositDue)} deposit + 3.5% processing (${money(fee)})`;
-            if (quote.payUrl) {
-              payCardBtn.href = quote.payUrl;
-              payCardBtn.hidden = false;
-            } else {
-              payCardBtn.hidden = true;
-            }
-          } else if (payBlock) {
-            payBlock.hidden = true;
-          }
           els.notes.textContent = quote.notes || "Scope and deliverables as discussed.";
           const items = Array.isArray(quote.lineItems) ? quote.lineItems : [];
           if (items.length) {
@@ -736,6 +812,32 @@
 
         els.approve.addEventListener("click", () => submit("approve"));
         els.decline.addEventListener("click", () => submit("decline"));
+        els.donePayCardBtn?.addEventListener("click", async () => {
+          const payToken = payTokenFromUrl(currentQuote?.payUrl);
+          if (!payToken) return;
+          els.donePayError.hidden = true;
+          els.donePayCardBtn.disabled = true;
+          try {
+            const res = await fetch("/api/public/pay/checkout", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ kind: "quote", token: payToken }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+              if (data.signUrl && data.needsSignature) {
+                location.href = data.signUrl;
+                return;
+              }
+              throw new Error(data.error || "Could not start checkout");
+            }
+            location.href = data.url;
+          } catch (err) {
+            els.donePayError.textContent = err.message || "Checkout failed";
+            els.donePayError.hidden = false;
+            els.donePayCardBtn.disabled = false;
+          }
+        });
 
         async function boot() {
           if (!token) {
@@ -750,12 +852,19 @@
             const quote = data.quote;
             if (quote.status === "approved" || quote.status === "declined") {
               showDone(quote);
+              if (quote.status === "approved") await confirmPaidIfNeeded(quote);
               return;
             }
             if (quote.status !== "sent" && quote.status !== "revisions_requested") {
               els.errorDetail.textContent = "This quote is not open for signature.";
               show("error");
               return;
+            }
+            // Returning from checkout before signing — keep them on the sign form.
+            if (params.get("paid") === "1") {
+              els.formError.hidden = false;
+              els.formError.textContent =
+                "Please sign and approve this quote first. After you sign, you can pay the deposit.";
             }
             fillQuote(quote);
             show("form");

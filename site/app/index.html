@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -12,7 +12,7 @@
       href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/app/app.css" />
+    <link rel="stylesheet" href="/app/app.css?v=20260804d" />
   </head>
   <body>
     <div class="mobile-bar">
@@ -107,7 +107,7 @@
         <header class="app-top">
           <div>
             <h1 id="view-title">Home</h1>
-            <p id="view-sub">Today’s work at a glance.</p>
+            <p id="view-sub">Today?s work at a glance.</p>
           </div>
           <div class="app-top__actions">
             <div class="week-nav" id="week-nav" hidden>
@@ -115,9 +115,9 @@
                 <button type="button" class="btn btn-soft is-active" data-cal-mode="week">Week</button>
                 <button type="button" class="btn btn-soft" data-cal-mode="month">Month</button>
               </div>
-              <button type="button" class="btn btn-soft" id="week-prev" aria-label="Previous">‹</button>
+              <button type="button" class="btn btn-soft" id="week-prev" aria-label="Previous">?</button>
               <button type="button" class="btn btn-soft" id="week-today">Today</button>
-              <button type="button" class="btn btn-soft" id="week-next" aria-label="Next">›</button>
+              <button type="button" class="btn btn-soft" id="week-next" aria-label="Next">?</button>
               <span class="week-label" id="week-label"></span>
               <button type="button" class="btn btn-soft schedule-map-nav-btn" id="schedule-map-toggle" aria-pressed="true">
                 Hide map
@@ -146,7 +146,7 @@
                   <span class="create-item__bar" aria-hidden="true"></span>
                   <span class="create-item__text">
                     <span class="create-item__name">Request</span>
-                    <span class="create-item__tag">Internal · Rob → Brad</span>
+                    <span class="create-item__tag">Internal ? Rob ? Brad</span>
                   </span>
                 </button>
                 <button type="button" class="create-item tone-indigo" data-create="client" role="menuitem">
@@ -160,7 +160,7 @@
                   <span class="create-item__bar" aria-hidden="true"></span>
                   <span class="create-item__text">
                     <span class="create-item__name">Quote</span>
-                    <span class="create-item__tag">Optional — from a client</span>
+                    <span class="create-item__tag">Optional ? from a client</span>
                   </span>
                 </button>
                 <button type="button" class="create-item tone-rust" data-create="invoice" role="menuitem">
@@ -205,7 +205,7 @@
         </div>
       </div>
       <div class="drawer__body client-detail" id="client-detail-body">
-        <p class="muted">Loading client…</p>
+        <p class="muted">Loading client?</p>
       </div>
     </aside>
 
@@ -242,7 +242,7 @@
               </select>
             </label>
           </div>
-          <p class="field-help">Requests are internal — Rob logs what the client wants, Brad picks it up.</p>
+          <p class="field-help">Requests are internal ? Rob logs what the client wants, Brad picks it up.</p>
         </div>
         <div class="field-group">
           <p class="field-group__label">Client</p>
@@ -273,7 +273,7 @@
             <div class="client-logo-fields__inputs">
               <label class="field">
                 <span>Company logo URL</span>
-                <input name="logoUrl" id="lead-logo-url" type="text" inputmode="url" placeholder="https://…/logo.png" />
+                <input name="logoUrl" id="lead-logo-url" type="text" inputmode="url" placeholder="https://?/logo.png" />
               </label>
               <label class="field">
                 <span>Or upload logo</span>
@@ -343,7 +343,7 @@
               id="lead-notes"
               rows="3"
               data-rewrite="lead"
-              placeholder="Scope, goals, must-haves, timeline — what Rob heard from the client…"
+              placeholder="Scope, goals, must-haves, timeline ? what Rob heard from the client?"
             ></textarea>
           </label>
         </div>
@@ -374,7 +374,7 @@
             <p class="field-group__label">Build</p>
             <label class="field">
               <span>Title</span>
-              <input name="title" required placeholder="Site audit — Valley Mechanical" />
+              <input name="title" required placeholder="Site audit ? Valley Mechanical" />
             </label>
             <div class="field-row">
               <label class="field">
@@ -435,13 +435,13 @@
             </div>
             <label class="field">
               <span>Build notes</span>
-              <textarea name="notes" rows="2" data-rewrite="build" placeholder="What needs to happen…"></textarea>
+              <textarea name="notes" rows="2" data-rewrite="build" placeholder="What needs to happen?"></textarea>
             </label>
             <button type="button" class="btn btn-soft" id="job-log-revisions">Log change request</button>
           </div>
         </form>
         <aside class="job-context" id="job-context" hidden>
-          <p class="muted">Loading history…</p>
+          <p class="muted">Loading history?</p>
         </aside>
       </div>
       <div class="drawer__foot">
@@ -468,7 +468,7 @@
           <p class="field-group__label">Client request</p>
           <label class="field">
             <span>What did they ask to change?</span>
-            <textarea name="body" rows="5" required placeholder="e.g. Swap hero image, add seasonal pricing, revise contact form…"></textarea>
+            <textarea name="body" rows="5" required placeholder="e.g. Swap hero image, add seasonal pricing, revise contact form?"></textarea>
           </label>
           <label class="field checkbox-field">
             <input type="checkbox" name="markBuild" checked />
@@ -508,7 +508,7 @@
                 <input
                   type="search"
                   id="quote-lead-search"
-                  placeholder="Type business or contact name…"
+                  placeholder="Type business or contact name?"
                   autocomplete="off"
                   spellcheck="false"
                   aria-autocomplete="list"
@@ -547,7 +547,7 @@
             </label>
             <label class="field">
               <span>Notes / scope</span>
-              <textarea name="notes" rows="2" data-rewrite="quote" placeholder="What’s included…"></textarea>
+              <textarea name="notes" rows="2" data-rewrite="quote" placeholder="What?s included?"></textarea>
             </label>
           </div>
           <div class="field-group">
@@ -562,7 +562,7 @@
                 <span>What this costs</span>
                 <strong id="quote-subtotal-display">$0.00</strong>
               </p>
-              <p class="field-help">Full price from the line items — the value before any deal.</p>
+              <p class="field-help">Full price from the line items ? the value before any deal.</p>
               <div class="field-row quote-discount-row">
                 <label class="field">
                   <span>Discount label</span>
@@ -578,7 +578,7 @@
                 <textarea
                   name="discountNote"
                   rows="2"
-                  placeholder="Optional note under the discount — e.g. why it applies, expiry, or conditions…"
+                  placeholder="Optional note under the discount ? e.g. why it applies, expiry, or conditions?"
                 ></textarea>
               </label>
               <p class="quote-total-line quote-total-line--charge">
@@ -589,7 +589,7 @@
                 <span>Deposit due to begin (CAD)</span>
                 <input name="deposit" type="number" min="0" step="0.01" value="0" />
               </label>
-              <p class="field-help">Defaults to 50% of the investment total. This is what How to pay / card checkout asks for — not the full amount.</p>
+              <p class="field-help">Defaults to 50% of the investment total. This is what How to pay / card checkout asks for ? not the full amount.</p>
             </div>
           </div>
           <div class="field-group">
@@ -599,7 +599,7 @@
               <textarea
                 name="terms"
                 rows="5"
-                placeholder="Payment schedule, timelines, change requests, ownership…"
+                placeholder="Payment schedule, timelines, change requests, ownership?"
               ></textarea>
             </label>
           </div>
@@ -610,7 +610,7 @@
               <textarea
                 name="addendums"
                 rows="3"
-                placeholder="Optional addendums, exclusions, or phase assumptions…"
+                placeholder="Optional addendums, exclusions, or phase assumptions?"
               ></textarea>
             </label>
           </div>
@@ -635,7 +635,7 @@
                 hidden
               />
               <p class="quote-file-drop__title">Drop additional files here</p>
-              <p class="muted quote-file-drop__hint">PDF, Word, Excel, images, or zip · up to 12 MB each · click to browse</p>
+              <p class="muted quote-file-drop__hint">PDF, Word, Excel, images, or zip ? up to 12 MB each ? click to browse</p>
             </div>
             <div id="quote-file-list" class="quote-file-list"></div>
           </div>
@@ -671,6 +671,9 @@
         <div class="drawer__foot-actions">
           <button type="button" class="btn btn-ghost" id="cancel-quote">Cancel</button>
           <button type="button" class="btn btn-soft" id="print-quote">Print / PDF</button>
+          <button type="button" class="btn btn-soft" id="preview-quote-client" hidden>
+            Preview as client
+          </button>
           <button type="button" class="btn btn-soft" id="send-quote">Send</button>
           <button type="button" class="btn btn-soft" id="copy-quote-pay-link">Copy pay link</button>
           <button type="button" class="btn btn-soft" id="quote-schedule-build" hidden>Schedule build</button>
@@ -700,7 +703,7 @@
               <label class="field">
                 <span>Client</span>
                 <select name="leadPicker" id="invoice-lead-picker">
-                  <option value="">Select a client…</option>
+                  <option value="">Select a client?</option>
                 </select>
               </label>
               <label class="field">
@@ -722,7 +725,7 @@
             <p class="field-group__label">Invoice</p>
             <label class="field">
               <span>Title / project</span>
-              <input name="title" required placeholder="Site audit — Valley Mechanical" />
+              <input name="title" required placeholder="Site audit ? Valley Mechanical" />
             </label>
             <div class="field-row">
               <label class="field">
@@ -799,7 +802,7 @@
             <p class="field-group__label">Notes</p>
             <label class="field">
               <span>Shown on invoice</span>
-              <textarea name="notes" rows="2" data-rewrite="invoice" placeholder="E-transfer to hello@vanderven.ca…"></textarea>
+              <textarea name="notes" rows="2" data-rewrite="invoice" placeholder="E-transfer to hello@vanderven.ca?"></textarea>
             </label>
           </div>
         </form>
@@ -825,7 +828,7 @@
     </aside>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <script src="/app/pdf-editor.js?v=20260804b"></script>
-    <script src="/app/app.js?v=20260804b"></script>
+    <script src="/app/pdf-editor.js?v=20260804e"></script>
+    <script src="/app/app.js?v=20260804e"></script>
   </body>
 </html>
