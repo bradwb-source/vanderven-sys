@@ -93,10 +93,43 @@
         color: #8a7340;
         font-weight: 700;
       }
+      .pricing-rows {
+        margin: 0.65rem 0 0.35rem;
+        display: grid;
+        gap: 0.3rem;
+      }
+      .pricing-rows .row {
+        display: flex;
+        justify-content: space-between;
+        gap: 1rem;
+        font-size: 0.9rem;
+        color: #3a424c;
+      }
+      .pricing-rows .row.is-list span:last-child {
+        text-decoration: line-through;
+        color: #8a9199;
+      }
+      .pricing-rows .row.is-discount span:last-child {
+        color: #6b5a2e;
+        font-weight: 650;
+      }
       .amount strong {
-        display: block;
+        display: inline;
         margin-top: 0.25rem;
         font-size: 1.65rem;
+      }
+      .amount.has-breakdown strong {
+        display: inline-block;
+        margin-top: 0.35rem;
+        padding-top: 0.45rem;
+        border-top: 1px solid #e0d6c4;
+      }
+      .discount-note {
+        margin: 0.65rem 0 0;
+        font-size: 0.85rem;
+        line-height: 1.45;
+        color: var(--muted);
+        white-space: pre-wrap;
       }
       .notes {
         margin: 1.15rem 0 0;
@@ -105,6 +138,44 @@
         color: #3a424c;
         white-space: pre-wrap;
       }
+      .quote-lines {
+        margin-top: 1.15rem;
+        overflow: auto;
+      }
+      .quote-lines table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.9rem;
+      }
+      .quote-lines th {
+        text-align: left;
+        font-size: 0.7rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--muted);
+        padding: 0.45rem 0.35rem;
+        border-bottom: 1px solid var(--line);
+      }
+      .quote-lines td {
+        padding: 0.55rem 0.35rem;
+        border-bottom: 1px solid #ece6da;
+        vertical-align: top;
+      }
+      .quote-lines .num { text-align: right; white-space: nowrap; }
+      .quote-extra {
+        margin-top: 1.15rem;
+        padding: 0.85rem 0.95rem;
+        border-radius: 12px;
+        background: #f7f2e8;
+      }
+      .quote-extra .label {
+        font-size: 0.7rem;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: #8a7340;
+        font-weight: 700;
+      }
+      .quote-extra .notes { margin-top: 0.45rem; font-size: 0.92rem; }
       .sign-block {
         margin-top: 1.5rem;
         padding-top: 1.35rem;
@@ -216,6 +287,54 @@
         font-size: 0.9rem;
       }
       .muted { color: var(--muted); }
+      .pay-block {
+        margin-top: 1.35rem;
+        padding-top: 1.25rem;
+        border-top: 1px solid var(--line);
+      }
+      .pay-block h2 {
+        margin: 0 0 0.35rem;
+        font-family: var(--font-display);
+        font-size: 1.55rem;
+        font-weight: 600;
+      }
+      .pay-block .help {
+        margin: 0 0 0.9rem;
+        color: var(--muted);
+        font-size: 0.92rem;
+      }
+      .pay-options {
+        display: grid;
+        gap: 0.75rem;
+      }
+      @media (min-width: 560px) {
+        .pay-options { grid-template-columns: 1fr 1fr; }
+      }
+      .pay-option {
+        padding: 1rem 1.05rem;
+        border-radius: 12px;
+        background: #f7f2e8;
+        border: 1px solid #e0d6c4;
+      }
+      .pay-option h3 {
+        margin: 0;
+        font-size: 1rem;
+        font-weight: 700;
+      }
+      .pay-option .amount {
+        margin: 0.55rem 0 0;
+        padding: 0;
+        background: transparent;
+        font-size: 1.35rem;
+        font-weight: 700;
+      }
+      .pay-option .detail {
+        margin: 0.45rem 0 0;
+        font-size: 0.88rem;
+        line-height: 1.45;
+        color: var(--muted);
+      }
+      .pay-option .btn { width: 100%; margin-top: 0.85rem; }
       [hidden] { display: none !important; }
     </style>
   </head>
@@ -254,12 +373,44 @@
           </p>
         </div>
         <div class="body">
-          <div class="amount">
-            <div class="label">Investment</div>
-            <strong id="q-amount"></strong>
-            <span class="muted" style="font-size: 0.85rem">CAD · subject to final scope confirmation</span>
+          <div class="amount" id="q-pricing">
+            <div class="label">Investment total</div>
+            <div id="q-pricing-rows" class="pricing-rows" hidden></div>
+            <p class="discount-note" id="q-discount-note" hidden></p>
+            <strong id="q-amount"></strong> <span class="muted" style="font-size: 0.95rem">CAD</span>
           </div>
           <p class="notes" id="q-notes"></p>
+          <div id="q-lines" class="quote-lines" hidden></div>
+          <div id="q-terms-wrap" class="quote-extra" hidden>
+            <div class="label">Terms &amp; conditions</div>
+            <p id="q-terms" class="notes"></p>
+          </div>
+          <div id="q-addendums-wrap" class="quote-extra" hidden>
+            <div class="label">Addendums</div>
+            <p id="q-addendums" class="notes"></p>
+          </div>
+
+          <div class="pay-block" id="q-pay-block">
+            <h2>How to pay</h2>
+            <p class="help">Choose one — e-Transfer has no fee; card includes 3.5% processing.</p>
+            <div class="pay-options">
+              <div class="pay-option">
+                <h3>Pay via e-Transfer</h3>
+                <p class="amount" id="q-pay-etransfer-amount"></p>
+                <p class="detail">
+                  No extra fee.<br />
+                  Send Interac to <strong id="q-pay-accounting"></strong><br />
+                  Memo: <strong id="q-pay-memo"></strong>
+                </p>
+              </div>
+              <div class="pay-option">
+                <h3>Pay by card</h3>
+                <p class="amount" id="q-pay-card-amount"></p>
+                <p class="detail" id="q-pay-card-detail"></p>
+                <a class="btn btn-primary" id="q-pay-card-btn" href="#">Pay by card</a>
+              </div>
+            </div>
+          </div>
 
           <div class="sign-block">
             <h2>Approve &amp; sign</h2>
@@ -314,7 +465,14 @@
           client: document.getElementById("q-client"),
           companyTag: document.getElementById("q-company-tag"),
           amount: document.getElementById("q-amount"),
+          pricingRows: document.getElementById("q-pricing-rows"),
+          discountNote: document.getElementById("q-discount-note"),
           notes: document.getElementById("q-notes"),
+          lines: document.getElementById("q-lines"),
+          termsWrap: document.getElementById("q-terms-wrap"),
+          terms: document.getElementById("q-terms"),
+          addendumsWrap: document.getElementById("q-addendums-wrap"),
+          addendums: document.getElementById("q-addendums"),
           name: document.getElementById("signed-name"),
           agree: document.getElementById("agree"),
           clear: document.getElementById("clear-sig"),
@@ -333,8 +491,12 @@
         function showDone(quote) {
           const approved = quote.status === "approved";
           els.doneTitle.textContent = approved ? "Quote approved" : "Quote declined";
+          const payHint =
+            approved && quote.payUrl
+              ? ` You can pay the deposit by card or e-Transfer here: ${quote.payUrl}`
+              : "";
           els.doneDetail.textContent = approved
-            ? `Thanks${quote.signedName ? `, ${quote.signedName}` : ""}. ${quote.number} is signed and on file with Vanderven Systems.`
+            ? `Thanks${quote.signedName ? `, ${quote.signedName}` : ""}. ${quote.number} is signed and on file with Vanderven Systems.${payHint}`
             : `${quote.number} was marked declined. You can reply to your Vanderven contact if you’d like to revisit.`;
           if (approved && quote.signaturePng) {
             els.doneSig.hidden = false;
@@ -350,8 +512,111 @@
           els.title.textContent = quote.title || "Quote";
           els.client.textContent = quote.clientName || "Client";
           els.companyTag.textContent = quote.company?.tagline || "";
-          els.amount.textContent = quote.amountLabel || "";
+          const money = (cents) =>
+            ((Number(cents) || 0) / 100).toLocaleString("en-CA", {
+              style: "currency",
+              currency: "CAD",
+            });
+          const subtotalCents = Number(quote.subtotalCents) || Number(quote.amountCents) || 0;
+          const discountCents = Math.max(
+            0,
+            Math.min(subtotalCents, Number(quote.discountCents) || 0)
+          );
+          els.amount.textContent = quote.amountLabel || money(quote.amountCents);
+          const pricingEl = document.getElementById("q-pricing");
+          if (discountCents > 0) {
+            els.pricingRows.hidden = false;
+            els.pricingRows.innerHTML = `
+              <div class="row is-list"><span>What this costs</span><span>${escapeHtml(
+                money(subtotalCents)
+              )}</span></div>
+              <div class="row is-discount"><span>${escapeHtml(
+                quote.discountLabel || "Discount"
+              )}</span><span>−${escapeHtml(money(discountCents))}</span></div>`;
+          } else {
+            els.pricingRows.hidden = true;
+            els.pricingRows.innerHTML = "";
+          }
+          if (quote.discountNote) {
+            els.discountNote.hidden = false;
+            els.discountNote.textContent = quote.discountNote;
+          } else {
+            els.discountNote.hidden = true;
+            els.discountNote.textContent = "";
+          }
+          pricingEl?.classList.toggle(
+            "has-breakdown",
+            discountCents > 0 || Boolean(quote.discountNote)
+          );
+          const payBlock = document.getElementById("q-pay-block");
+          const payEtransfer = document.getElementById("q-pay-etransfer-amount");
+          const payAccounting = document.getElementById("q-pay-accounting");
+          const payMemo = document.getElementById("q-pay-memo");
+          const payCardAmount = document.getElementById("q-pay-card-amount");
+          const payCardDetail = document.getElementById("q-pay-card-detail");
+          const payCardBtn = document.getElementById("q-pay-card-btn");
+          if (payBlock && Number(quote.amountCents) > 0) {
+            payBlock.hidden = false;
+            const fee = Number(quote.cardFeeCents) || Math.round(Number(quote.amountCents) * 0.035);
+            const cardTotal = Number(quote.cardTotalCents) || Number(quote.amountCents) + fee;
+            payEtransfer.textContent = money(quote.amountCents);
+            payAccounting.textContent =
+              quote.accountingEmail || quote.company?.accountingEmail || "accounting@vanderven.ca";
+            payMemo.textContent = quote.number || "your quote number";
+            payCardAmount.textContent = money(cardTotal);
+            payCardDetail.textContent = `${money(quote.amountCents)} + 3.5% processing (${money(fee)})`;
+            if (quote.payUrl) {
+              payCardBtn.href = quote.payUrl;
+              payCardBtn.hidden = false;
+            } else {
+              payCardBtn.hidden = true;
+            }
+          } else if (payBlock) {
+            payBlock.hidden = true;
+          }
           els.notes.textContent = quote.notes || "Scope and deliverables as discussed.";
+          const items = Array.isArray(quote.lineItems) ? quote.lineItems : [];
+          if (items.length) {
+            els.lines.hidden = false;
+            els.lines.innerHTML = `<table>
+              <thead><tr><th>Item</th><th class="num">Qty</th><th class="num">Rate</th><th class="num">Amount</th></tr></thead>
+              <tbody>${items
+                .map((item) => {
+                  const total = Math.round(Number(item.qty) * Number(item.unitCents || 0));
+                  return `<tr>
+                    <td>${escapeHtml(item.description || "")}</td>
+                    <td class="num">${escapeHtml(String(item.qty ?? 1))}</td>
+                    <td class="num">${escapeHtml(money(item.unitCents))}</td>
+                    <td class="num">${escapeHtml(money(total))}</td>
+                  </tr>`;
+                })
+                .join("")}</tbody></table>`;
+          } else {
+            els.lines.hidden = true;
+            els.lines.innerHTML = "";
+          }
+          if (quote.terms) {
+            els.termsWrap.hidden = false;
+            els.terms.textContent = quote.terms;
+          } else {
+            els.termsWrap.hidden = true;
+            els.terms.textContent = "";
+          }
+          if (quote.addendums) {
+            els.addendumsWrap.hidden = false;
+            els.addendums.textContent = quote.addendums;
+          } else {
+            els.addendumsWrap.hidden = true;
+            els.addendums.textContent = "";
+          }
+        }
+
+        function escapeHtml(value) {
+          return String(value ?? "")
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;");
         }
 
         const ctx = els.canvas.getContext("2d");

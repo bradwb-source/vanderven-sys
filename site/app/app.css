@@ -2554,6 +2554,181 @@ body.is-dragging-job .unscheduled-list {
   padding: 0.2rem;
 }
 
+.quote-sheet .invoice-sheet__brand {
+  align-items: center;
+}
+
+.quote-sheet__brand-left {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.45rem;
+}
+
+.quote-sheet__brand-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.quote-sheet .quote-sheet__logo,
+.quote-sheet .invoice-sheet__brand-left img {
+  width: 72px;
+  height: auto;
+  background: transparent !important;
+  border-radius: 0;
+  padding: 0;
+  box-shadow: none;
+  mix-blend-mode: normal;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.quote-sheet__name {
+  display: flex;
+  align-items: baseline;
+  gap: 0.28rem;
+  line-height: 1.1;
+}
+
+.quote-sheet__name strong {
+  display: inline;
+  font-size: 1.2rem;
+  letter-spacing: -0.02em;
+}
+
+.quote-sheet__name span {
+  opacity: 0.85;
+  font-size: 1.1rem;
+}
+
+.quote-sheet__tagline {
+  margin: 0;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  opacity: 0.8;
+  max-width: 22rem;
+}
+
+.quote-sheet__pre {
+  white-space: pre-wrap;
+}
+
+.quote-sheet__section + .quote-sheet__section {
+  margin-top: 0.75rem;
+}
+
+.quote-pricing-panel {
+  margin-top: 0.75rem;
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.75rem 0.85rem;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.35);
+}
+
+.quote-discount-row {
+  align-items: end;
+}
+
+.quote-total-line {
+  margin: 0;
+  font-size: 0.92rem;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.4rem;
+}
+
+.quote-total-line strong {
+  font-size: 1.05rem;
+  letter-spacing: -0.02em;
+}
+
+.quote-total-line--charge {
+  margin-top: 0.15rem;
+  padding-top: 0.55rem;
+  border-top: 1px solid var(--line);
+}
+
+.quote-total-line--charge strong {
+  font-size: 1.2rem;
+}
+
+.quote-sheet__proposal {
+  margin: 0 0 1.15rem;
+}
+
+.quote-sheet__proposal p {
+  margin: 0.25rem 0 0;
+  line-height: 1.5;
+  font-size: 0.92rem;
+}
+
+.quote-sheet__pricing {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.quote-sheet__list-price strong {
+  text-decoration: line-through;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.quote-sheet__discount strong {
+  color: #6b5a2e;
+}
+
+.quote-sheet__discount-note {
+  margin: 0.45rem 0 0;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--muted);
+  white-space: pre-wrap;
+}
+
+.quote-sheet__pay {
+  margin-top: 1.25rem;
+}
+
+.quote-sheet__pay-grid {
+  margin-top: 0.55rem;
+  display: grid;
+  gap: 0.65rem;
+}
+
+@media (min-width: 640px) {
+  .quote-sheet__pay-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.quote-sheet__pay-option {
+  padding: 0.85rem 0.95rem;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(247, 242, 232, 0.85);
+}
+
+.quote-sheet__pay-option strong {
+  display: block;
+  font-size: 0.95rem;
+}
+
+.quote-sheet__pay-amount {
+  margin: 0.4rem 0 0;
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+.quote-sheet__pay-option .muted {
+  margin: 0.4rem 0 0;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
 .invoice-sheet__brand-left strong {
   display: block;
   font-size: 1.05rem;
@@ -2782,9 +2957,134 @@ body.is-dragging-job .unscheduled-list {
   height: auto;
 }
 
+.client-deposits {
+  margin: 0 0 1.25rem;
+}
+
+.client-deposit-form {
+  display: grid;
+  gap: 0.55rem;
+  margin-bottom: 0.75rem;
+}
+
+.client-deposit-list {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.client-deposit-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.65rem;
+  align-items: center;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255, 252, 246, 0.7);
+}
+
+.client-deposit-row__meta {
+  display: grid;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.client-deposit-row__meta strong {
+  font-size: 0.92rem;
+}
+
+.client-deposit-row__meta .muted {
+  font-size: 0.76rem;
+}
+
+.client-deposit-row__actions {
+  display: flex;
+  gap: 0.25rem;
+}
+
 .quote-attachments {
   display: grid;
   gap: 0.45rem;
+}
+
+.quote-file-drop {
+  margin-top: 0.75rem;
+  padding: 1.1rem 1rem;
+  border: 1.5px dashed #c9bfa8;
+  border-radius: 12px;
+  background: rgba(255, 252, 246, 0.55);
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.quote-file-drop:hover,
+.quote-file-drop:focus-visible {
+  border-color: #8a7340;
+  background: rgba(247, 242, 232, 0.9);
+  outline: none;
+}
+
+.quote-file-drop.is-dragover {
+  border-color: #8a7340;
+  background: rgba(232, 220, 188, 0.55);
+  box-shadow: inset 0 0 0 1px rgba(138, 115, 64, 0.25);
+}
+
+.quote-file-drop.is-busy {
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+.quote-file-drop__title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 650;
+}
+
+.quote-file-drop__hint {
+  margin: 0.3rem 0 0;
+  font-size: 0.8rem;
+}
+
+.quote-file-list {
+  margin-top: 0.55rem;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.quote-file-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.65rem;
+  align-items: center;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255, 252, 246, 0.7);
+}
+
+.quote-file-row__meta {
+  display: grid;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.quote-file-row__meta strong {
+  font-size: 0.88rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quote-file-row__meta .muted {
+  font-size: 0.76rem;
+}
+
+.quote-file-row__actions {
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
 }
 
 .quote-attach-row {

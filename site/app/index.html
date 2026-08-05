@@ -528,7 +528,7 @@
             <div class="field-row">
               <label class="field">
                 <span>Number</span>
-                <input name="number" placeholder="Q-1046" />
+                <input name="number" placeholder="Auto Q-####" readonly />
               </label>
               <label class="field">
                 <span>Status</span>
@@ -541,27 +541,98 @@
                 </select>
               </label>
             </div>
-            <div class="field-row">
-              <label class="field">
-                <span>Client name on quote</span>
-                <input name="clientName" placeholder="Business name" />
-              </label>
-              <label class="field">
-                <span>Amount (CAD)</span>
-                <input name="amount" type="number" min="0" step="0.01" placeholder="4800" />
-              </label>
-            </div>
+            <label class="field">
+              <span>Client name on quote</span>
+              <input name="clientName" placeholder="Business name" />
+            </label>
             <label class="field">
               <span>Notes / scope</span>
               <textarea name="notes" rows="2" data-rewrite="quote" placeholder="What’s included…"></textarea>
             </label>
           </div>
           <div class="field-group">
+            <div class="field-group__head">
+              <p class="field-group__label">Line items</p>
+              <button type="button" class="btn btn-soft" id="quote-add-line">Add line</button>
+            </div>
+            <p class="field-help">Description, quantity, and rate for each deliverable.</p>
+            <div id="quote-lines" class="invoice-lines"></div>
+            <div class="quote-pricing-panel">
+              <p class="quote-total-line">
+                <span>What this costs</span>
+                <strong id="quote-subtotal-display">$0.00</strong>
+              </p>
+              <p class="field-help">Full price from the line items — the value before any deal.</p>
+              <div class="field-row quote-discount-row">
+                <label class="field">
+                  <span>Discount label</span>
+                  <input name="discountLabel" placeholder="Discount" />
+                </label>
+                <label class="field">
+                  <span>Discount (CAD)</span>
+                  <input name="discount" type="number" min="0" step="0.01" value="0" />
+                </label>
+              </div>
+              <label class="field">
+                <span>Discount footnote</span>
+                <textarea
+                  name="discountNote"
+                  rows="2"
+                  placeholder="Optional note under the discount — e.g. why it applies, expiry, or conditions…"
+                ></textarea>
+              </label>
+              <p class="quote-total-line quote-total-line--charge">
+                <span>Investment total</span>
+                <span class="quote-total-line__value"><strong id="quote-total-display">$0.00</strong> <span class="muted">CAD</span></span>
+              </p>
+            </div>
+          </div>
+          <div class="field-group">
+            <p class="field-group__label">Terms &amp; conditions</p>
+            <label class="field">
+              <span>Shown on the quote</span>
+              <textarea
+                name="terms"
+                rows="5"
+                placeholder="Payment schedule, timelines, change requests, ownership…"
+              ></textarea>
+            </label>
+          </div>
+          <div class="field-group">
+            <p class="field-group__label">Addendums</p>
+            <label class="field">
+              <span>Extra clauses or project-specific notes</span>
+              <textarea
+                name="addendums"
+                rows="3"
+                placeholder="Optional addendums, exclusions, or phase assumptions…"
+              ></textarea>
+            </label>
+          </div>
+          <div class="field-group">
             <p class="field-group__label">Attachments</p>
             <p class="field-help">
-              Placeholders for privacy, terms, and forms. Toggle <strong>Every quote</strong> for defaults, or pick per quote.
+              Library docs (privacy, CSA, NDA, etc.) plus any extra files you drop below for this quote.
             </p>
             <div id="quote-attachments" class="quote-attachments"></div>
+            <div
+              id="quote-file-drop"
+              class="quote-file-drop"
+              tabindex="0"
+              role="button"
+              aria-label="Drop files to attach to this quote"
+            >
+              <input
+                id="quote-file-input"
+                type="file"
+                multiple
+                accept=".pdf,.doc,.docx,.xls,.xlsx,.pptx,.txt,.csv,.png,.jpg,.jpeg,.webp,.gif,.zip,application/pdf"
+                hidden
+              />
+              <p class="quote-file-drop__title">Drop additional files here</p>
+              <p class="muted quote-file-drop__hint">PDF, Word, Excel, images, or zip · up to 12 MB each · click to browse</p>
+            </div>
+            <div id="quote-file-list" class="quote-file-list"></div>
           </div>
           <div class="field-group">
             <p class="field-group__label">Client signature</p>
@@ -596,6 +667,7 @@
           <button type="button" class="btn btn-ghost" id="cancel-quote">Cancel</button>
           <button type="button" class="btn btn-soft" id="print-quote">Print / PDF</button>
           <button type="button" class="btn btn-soft" id="send-quote">Send</button>
+          <button type="button" class="btn btn-soft" id="copy-quote-pay-link">Copy pay link</button>
           <button type="button" class="btn btn-soft" id="quote-schedule-build" hidden>Schedule build</button>
           <button type="submit" class="btn btn-primary" form="quote-form" id="save-quote">Save</button>
         </div>
@@ -741,6 +813,7 @@
           <button type="button" class="btn btn-ghost" id="cancel-invoice">Cancel</button>
           <button type="button" class="btn btn-soft" id="print-invoice">Print / PDF</button>
           <button type="button" class="btn btn-soft" id="send-invoice">Send</button>
+          <button type="button" class="btn btn-soft" id="copy-invoice-pay-link">Copy pay link</button>
           <button type="submit" class="btn btn-primary" form="invoice-form" id="save-invoice">Save</button>
         </div>
       </div>

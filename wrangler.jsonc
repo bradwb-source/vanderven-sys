@@ -17,7 +17,9 @@
       "/app",
       "/app/*",
       "/sign",
-      "/sign/*"
+      "/sign/*",
+      "/pay",
+      "/pay/*"
     ]
   },
   "d1_databases": [
