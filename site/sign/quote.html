@@ -391,8 +391,8 @@
           </div>
 
           <div class="pay-block" id="q-pay-block">
-            <h2>How to pay</h2>
-            <p class="help">Choose one — e-Transfer has no fee; card includes 3.5% processing.</p>
+            <h2>Deposit due to begin</h2>
+            <p class="help">Kickoff deposit only — balance is invoiced later. e-Transfer has no fee; card includes 3.5% processing.</p>
             <div class="pay-options">
               <div class="pay-option">
                 <h3>Pay via e-Transfer</h3>
@@ -555,16 +555,19 @@
           const payCardAmount = document.getElementById("q-pay-card-amount");
           const payCardDetail = document.getElementById("q-pay-card-detail");
           const payCardBtn = document.getElementById("q-pay-card-btn");
-          if (payBlock && Number(quote.amountCents) > 0) {
+          const depositDue =
+            Number(quote.depositDueCents) ||
+            Math.round((Number(quote.amountCents) || 0) * 0.5);
+          if (payBlock && depositDue > 0) {
             payBlock.hidden = false;
-            const fee = Number(quote.cardFeeCents) || Math.round(Number(quote.amountCents) * 0.035);
-            const cardTotal = Number(quote.cardTotalCents) || Number(quote.amountCents) + fee;
-            payEtransfer.textContent = money(quote.amountCents);
+            const fee = Number(quote.cardFeeCents) || Math.round(depositDue * 0.035);
+            const cardTotal = Number(quote.cardTotalCents) || depositDue + fee;
+            payEtransfer.textContent = money(depositDue);
             payAccounting.textContent =
               quote.accountingEmail || quote.company?.accountingEmail || "accounting@vanderven.ca";
             payMemo.textContent = quote.number || "your quote number";
             payCardAmount.textContent = money(cardTotal);
-            payCardDetail.textContent = `${money(quote.amountCents)} + 3.5% processing (${money(fee)})`;
+            payCardDetail.textContent = `${money(depositDue)} deposit + 3.5% processing (${money(fee)})`;
             if (quote.payUrl) {
               payCardBtn.href = quote.payUrl;
               payCardBtn.hidden = false;

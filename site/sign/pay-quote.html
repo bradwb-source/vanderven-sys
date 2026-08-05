@@ -135,8 +135,12 @@
           <div id="cancel-banner" class="banner warn" hidden>Checkout was cancelled. You can try again or pay by e-transfer.</div>
 
           <div class="panel">
-            <h2>Deposit amount</h2>
-            <div class="row"><span>Investment total</span><strong id="p-base"></strong></div>
+            <h2>Deposit due to begin</h2>
+            <div class="row"><span>Investment total</span><span id="p-investment"></span></div>
+            <div class="row total"><span>Deposit due now</span><strong id="p-base"></strong></div>
+            <p class="muted" style="margin: 0.65rem 0 0; line-height: 1.45">
+              This is your kickoff deposit only. The balance is invoiced later.
+            </p>
           </div>
 
           <div class="panel">
@@ -217,6 +221,8 @@
             els.number.textContent = pay.number || "";
             els.title.textContent = pay.title || "Quote deposit";
             els.client.textContent = pay.clientName || "Client";
+            const investment = document.getElementById("p-investment");
+            if (investment) investment.textContent = money(pay.amountCents || pay.baseCents);
             els.base.textContent = money(pay.baseCents);
             els.etransfer.textContent = money(pay.baseCents);
             els.cardBase.textContent = money(pay.baseCents);

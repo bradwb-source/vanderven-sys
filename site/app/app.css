@@ -2536,8 +2536,8 @@ body.is-dragging-job .unscheduled-list {
   justify-content: space-between;
   gap: 1rem;
   padding: 1.15rem 1.2rem;
-  background: linear-gradient(135deg, #1c2430 0%, #2d3a4a 55%, #3d3424 100%);
-  color: #f7f1e6;
+  background: #1f3a5f;
+  color: #f4f7fb;
 }
 
 .invoice-sheet__brand-left {

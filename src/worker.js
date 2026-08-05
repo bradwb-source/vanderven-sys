@@ -456,12 +456,37 @@ async function sha256Hex(value) {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-function originFromRequest(request) {
+/** Prefer PUBLIC_APP_ORIGIN so email links match vanderven.ca (not workers.dev). */
+function publicAppOrigin(env, requestOrUrl = "") {
+  const configured = cleanText(env?.PUBLIC_APP_ORIGIN || "", 240).replace(/\/+$/, "");
+  if (configured) {
+    try {
+      return new URL(configured).origin;
+    } catch {
+      /* ignore bad config */
+    }
+  }
+  try {
+    if (requestOrUrl && typeof requestOrUrl === "object" && requestOrUrl.url) {
+      return new URL(requestOrUrl.url).origin;
+    }
+    if (typeof requestOrUrl === "string" && requestOrUrl) {
+      return new URL(requestOrUrl).origin;
+    }
+  } catch {
+    /* ignore */
+  }
+  return "";
+}
+
+function originFromRequest(request, env = null) {
+  const preferred = publicAppOrigin(env, request);
+  if (preferred) return preferred;
   try {
     const url = new URL(request.url);
     return `${url.protocol}//${url.host}`;
   } catch {
-    return "https://vanderven.ca";
+    return "https://app.vanderven.ca";
   }
 }
 
@@ -502,7 +527,7 @@ async function requestPasswordReset(env, emailRaw, request) {
       .bind(id, user.id, email, tokenHash, expiresAt, ts)
       .run();
 
-    const origin = originFromRequest(request);
+    const origin = originFromRequest(request, env);
     const link = `${origin}/login?reset=${encodeURIComponent(token)}`;
     await deliverReminder(env, {
       toEmail: email,
@@ -2711,6 +2736,10 @@ function rowToQuote(row, { includeSignature = false } = {}) {
     Math.min(subtotalCents, Number(row.discount_cents) || 0)
   );
   const amountCents = Math.max(0, subtotalCents - discountCents);
+  const depositCents =
+    row.deposit_cents != null && row.deposit_cents !== ""
+      ? Math.max(0, Math.min(amountCents, Math.round(Number(row.deposit_cents) || 0)))
+      : null;
   const quote = {
     id: row.id,
     leadId: row.lead_id || null,
@@ -2723,6 +2752,8 @@ function rowToQuote(row, { includeSignature = false } = {}) {
     discountLabel: row.discount_label || "",
     discountNote: row.discount_note || "",
     amountCents,
+    depositCents,
+    depositDueCents: quoteDepositDueCents({ amountCents, depositCents }),
     lineItems,
     notes: row.notes || "",
     terms: row.terms || "",
@@ -3334,18 +3365,84 @@ function formatQuotePricingHtml(quote) {
   </div>`;
 }
 
+/** Solid navy — email clients often strip CSS gradients and leave light text on white. */
+const EMAIL_BRAND_BG = "#1f3a5f";
+const EMAIL_BRAND_FG = "#f4f7fb";
+const EMAIL_BRAND_MUTED = "#c5d4e8";
+
+function emailBrandHeaderHtml({
+  logoUrl = "",
+  kicker = "Quote",
+  number = "",
+  detailHtml = "",
+}) {
+  const logoCell = logoUrl
+    ? `<td style="vertical-align:middle;padding:0 12px 0 0;width:64px;">
+        <img src="${escapeHtmlText(logoUrl)}" alt="Vanderven Systems" width="56" height="56" style="display:block;width:56px;max-width:56px;height:auto;border:0;outline:none;text-decoration:none;" />
+      </td>`
+    : "";
+  return `
+    <table width="100%" cellpadding="0" cellspacing="0" role="presentation" bgcolor="${EMAIL_BRAND_BG}" style="background-color:${EMAIL_BRAND_BG};background:${EMAIL_BRAND_BG};">
+      <tr>
+        <td bgcolor="${EMAIL_BRAND_BG}" style="padding:22px 24px;background-color:${EMAIL_BRAND_BG};background:${EMAIL_BRAND_BG};">
+          <table width="100%" cellpadding="0" cellspacing="0" role="presentation">
+            <tr>
+              <td valign="top" style="vertical-align:top;padding:0 12px 12px 0;">
+                <table cellpadding="0" cellspacing="0" role="presentation"><tr>
+                  ${logoCell}
+                  <td style="vertical-align:middle;">
+                    <div style="font-family:Georgia,Times,serif;font-size:20px;font-weight:700;line-height:1.2;color:${EMAIL_BRAND_FG};mso-line-height-rule:exactly;">
+                      Vanderven <span style="font-weight:500;color:#e0c070;">Systems</span>
+                    </div>
+                  </td>
+                </tr></table>
+                <p style="margin:10px 0 0;font-family:Segoe UI,Helvetica,Arial,sans-serif;font-size:12px;line-height:1.45;color:${EMAIL_BRAND_MUTED};">
+                  ${escapeHtmlText(COMPANY.tagline)}<br/>
+                  ${escapeHtmlText(COMPANY.location)} · ${escapeHtmlText(COMPANY.email)}
+                </p>
+              </td>
+              <td valign="top" width="42%" style="vertical-align:top;text-align:right;padding:0 0 12px 8px;">
+                <div style="font-family:Segoe UI,Helvetica,Arial,sans-serif;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:${EMAIL_BRAND_MUTED};">${escapeHtmlText(kicker)}</div>
+                <div style="font-family:Segoe UI,Helvetica,Arial,sans-serif;font-size:24px;font-weight:700;margin-top:4px;line-height:1.2;color:${EMAIL_BRAND_FG};">${escapeHtmlText(number)}</div>
+                ${
+                  detailHtml
+                    ? `<div style="margin-top:10px;font-family:Segoe UI,Helvetica,Arial,sans-serif;font-size:12px;line-height:1.5;color:${EMAIL_BRAND_MUTED};">${detailHtml}</div>`
+                    : ""
+                }
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>`;
+}
+
+async function logoInlineAttachment(env) {
+  const file = await loadQuoteDocumentFile(
+    env,
+    {
+      filePath: "/public/logo-mark-nav-transparent.png",
+      fileName: "vanderven-logo.png",
+    },
+    ""
+  );
+  if (!file?.content) return null;
+  return {
+    filename: "vanderven-logo.png",
+    content: file.content,
+    contentId: "vds-logo",
+  };
+}
+
 function buildQuoteLetterheadHtml(
   quote,
   documents = [],
   { absoluteLogoUrl = "", signUrl = "", payUrl = "" } = {}
 ) {
-  const logo = absoluteLogoUrl
-    ? `<img src="${escapeHtmlText(absoluteLogoUrl)}" alt="Vanderven Systems" width="92" style="display:block;width:92px;height:auto;background:transparent;border:0;" />`
-    : `<div style="font-family:Georgia,serif;font-size:22px;font-weight:700;color:#f7f1e6;">Vanderven <span style="font-weight:500;color:#d4b56a;">Systems</span></div>`;
   const attachments = (documents || [])
     .map(
       (doc) =>
-        `<li style="margin:0 0 6px;font-size:13px;color:#1c2430;"><strong>${escapeHtmlText(
+        `<li style="margin:0 0 6px;font-size:13px;color:#1c2430;word-break:break-word;"><strong>${escapeHtmlText(
           doc.title
         )}</strong> — ${escapeHtmlText(doc.summary || doc.kind)}</li>`
     )
@@ -3353,79 +3450,76 @@ function buildQuoteLetterheadHtml(
   const termsBlock = quote.terms
     ? `<div style="margin-top:22px;">
         <div style="font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:#8a7340;font-weight:700;">Terms &amp; conditions</div>
-        <p style="margin:8px 0 0;font-size:13px;line-height:1.55;color:#3a424c;white-space:pre-wrap;">${escapeHtmlText(quote.terms)}</p>
+        <p style="margin:8px 0 0;font-size:13px;line-height:1.55;color:#3a424c;white-space:pre-wrap;word-break:break-word;">${escapeHtmlText(quote.terms)}</p>
       </div>`
     : "";
   const addendumBlock = quote.addendums
     ? `<div style="margin-top:22px;">
         <div style="font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:#8a7340;font-weight:700;">Addendums</div>
-        <p style="margin:8px 0 0;font-size:13px;line-height:1.55;color:#3a424c;white-space:pre-wrap;">${escapeHtmlText(quote.addendums)}</p>
+        <p style="margin:8px 0 0;font-size:13px;line-height:1.55;color:#3a424c;white-space:pre-wrap;word-break:break-word;">${escapeHtmlText(quote.addendums)}</p>
       </div>`
     : "";
+  const header = emailBrandHeaderHtml({
+    logoUrl: absoluteLogoUrl,
+    kicker: "Quote",
+    number: quote.number,
+    detailHtml: `Prepared for ${escapeHtmlText(quote.clientName || "Client")}<br/>${escapeHtmlText(formatCadCents(quote.amountCents))}`,
+  });
   return `<!DOCTYPE html>
-<html><head><meta charset="utf-8" /><title>Quote ${escapeHtmlText(quote.number)}</title></head>
-<body style="margin:0;padding:0;background:#f3f0ea;color:#1c2430;">
-  <div style="max-width:720px;margin:0 auto;padding:28px 20px;font-family:Segoe UI,Helvetica,Arial,sans-serif;">
-    <div style="background:#fffaf3;border:1px solid #ddd4c4;border-radius:14px;overflow:hidden;">
-      <div style="padding:24px 28px 20px;background:linear-gradient(135deg,#1c2430 0%,#2d3a4a 55%,#3d3424 100%);color:#f7f1e6;">
-        <table width="100%" cellpadding="0" cellspacing="0"><tr>
-          <td style="vertical-align:middle;">
-            <table cellpadding="0" cellspacing="0"><tr>
-              <td style="vertical-align:middle;padding-right:14px;">${logo}</td>
-              <td style="vertical-align:middle;">
-                <div style="font-size:20px;font-weight:700;letter-spacing:-0.02em;line-height:1.15;">Vanderven Systems</div>
-              </td>
-            </tr></table>
-            <p style="margin:10px 0 0;font-size:12px;opacity:0.85;line-height:1.45;">${escapeHtmlText(COMPANY.tagline)}<br/>${escapeHtmlText(COMPANY.location)} · ${escapeHtmlText(COMPANY.email)}</p>
-          </td>
-          <td style="vertical-align:top;text-align:right;width:38%;">
-            <div style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;opacity:0.75;">Quote</div>
-            <div style="font-size:26px;font-weight:700;margin-top:4px;">${escapeHtmlText(quote.number)}</div>
-            <div style="margin-top:10px;font-size:12px;line-height:1.5;opacity:0.9;">
-              Prepared for ${escapeHtmlText(quote.clientName || "Client")}<br/>
-              ${escapeHtmlText(formatCadCents(quote.amountCents))}
-            </div>
-          </td>
-        </tr></table>
-      </div>
-      <div style="padding:28px 32px;">
-        <div style="font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:#8a7340;font-weight:700;">Proposal</div>
-        <h1 style="margin:8px 0 0;font-size:22px;line-height:1.3;">${escapeHtmlText(quote.title)}</h1>
-        <p style="margin:14px 0 0;font-size:14px;line-height:1.55;color:#3a424c;white-space:pre-wrap;">
-          ${escapeHtmlText(quote.notes || "Scope and deliverables as discussed.")}
-        </p>
-        ${formatQuoteLineItemsHtml(quote.lineItems)}
-        ${formatQuotePricingHtml(quote)}
-        ${termsBlock}
-        ${addendumBlock}
-        ${
-          attachments
-            ? `<div style="margin-top:24px;">
-                <div style="font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:#8a7340;font-weight:700;">Attached with this quote</div>
-                <ul style="margin:10px 0 0;padding-left:18px;">${attachments}</ul>
-                <p style="margin:10px 0 0;font-size:12px;color:#5c6570;">Supporting documents attached with this quote.</p>
-              </div>`
-            : ""
-        }
-        ${
-          signUrl
-            ? `<div style="margin-top:28px;text-align:center;">
-                <a href="${escapeHtmlText(signUrl)}" style="display:inline-block;padding:14px 22px;background:#b8953e;color:#141820;text-decoration:none;font-weight:700;font-size:14px;border-radius:10px;">Review &amp; sign to approve</a>
-                <p style="margin:12px 0 0;font-size:12px;color:#5c6570;line-height:1.5;">This quote needs your signature before we start.</p>
-              </div>`
-            : ""
-        }
-        ${paymentInstructionsBlock({
-          baseCents: quote.amountCents,
-          payUrl,
-          number: quote.number,
-        }).html}
-        <div style="margin-top:28px;padding-top:16px;border-top:1px solid #e6e1d6;font-size:12px;color:#5c6570;line-height:1.55;">
-          Questions? Reply to this email or write <strong style="color:#1c2430;">${escapeHtmlText(COMPANY.email)}</strong>.<br/>
-          — ${escapeHtmlText(COMPANY.name)} · ${escapeHtmlText(COMPANY.web)}
-        </div>
-      </div>
-    </div>
+<html><head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Quote ${escapeHtmlText(quote.number)}</title>
+</head>
+<body style="margin:0;padding:0;background:#eef1f5;color:#1c2430;">
+  <div style="max-width:640px;margin:0 auto;padding:16px 12px;font-family:Segoe UI,Helvetica,Arial,sans-serif;">
+    <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="background:#ffffff;border:1px solid #d7dde6;border-radius:12px;overflow:hidden;">
+      <tr><td>${header}</td></tr>
+      <tr>
+        <td style="padding:24px 20px;">
+          <div style="font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:#8a7340;font-weight:700;">Proposal</div>
+          <h1 style="margin:8px 0 0;font-size:20px;line-height:1.3;color:#1c2430;word-break:break-word;">${escapeHtmlText(quote.title)}</h1>
+          <p style="margin:14px 0 0;font-size:14px;line-height:1.55;color:#3a424c;white-space:pre-wrap;word-break:break-word;">
+            ${escapeHtmlText(quote.notes || "Scope and deliverables as discussed.")}
+          </p>
+          ${formatQuoteLineItemsHtml(quote.lineItems)}
+          ${formatQuotePricingHtml(quote)}
+          ${termsBlock}
+          ${addendumBlock}
+          ${
+            attachments
+              ? `<div style="margin-top:24px;">
+                  <div style="font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:#8a7340;font-weight:700;">Attached with this quote</div>
+                  <ul style="margin:10px 0 0;padding-left:18px;">${attachments}</ul>
+                  <p style="margin:10px 0 0;font-size:12px;color:#5c6570;">Supporting documents attached with this quote.</p>
+                </div>`
+              : ""
+          }
+          ${
+            signUrl
+              ? `<div style="margin-top:28px;">
+                  <a href="${escapeHtmlText(signUrl)}" style="display:block;width:100%;box-sizing:border-box;padding:14px 16px;background:#b8953e;color:#141820;text-decoration:none;font-weight:700;font-size:15px;border-radius:10px;text-align:center;">Review &amp; sign to approve</a>
+                  <p style="margin:12px 0 0;font-size:12px;color:#5c6570;line-height:1.5;text-align:center;">This quote needs your signature before we start.</p>
+                </div>`
+              : ""
+          }
+          ${paymentInstructionsBlock({
+            baseCents: quoteDepositDueCents(quote),
+            payUrl,
+            number: quote.number,
+            heading: "Deposit due to begin",
+            blurb: "This is your kickoff deposit only — the balance is invoiced later.",
+            etransferTitle: "Pay deposit via e-Transfer",
+            cardTitle: "Pay deposit by card",
+            buttonLabel: "Pay deposit by card",
+          }).html}
+          <div style="margin-top:28px;padding-top:16px;border-top:1px solid #e6e1d6;font-size:12px;color:#5c6570;line-height:1.55;">
+            Questions? Reply to this email or write <strong style="color:#1c2430;">${escapeHtmlText(COMPANY.email)}</strong>.<br/>
+            — ${escapeHtmlText(COMPANY.name)} · ${escapeHtmlText(COMPANY.web)}
+          </div>
+        </td>
+      </tr>
+    </table>
   </div>
 </body></html>`;
 }
@@ -3449,6 +3543,7 @@ function buildQuotePlainText(quote, documents = [], { signUrl = "", payUrl = "" 
     discount ? `${quote.discountLabel || "Discount"}: −${formatCadCents(discount)} CAD` : "",
     quote.discountNote ? `Note: ${quote.discountNote}` : "",
     `Investment total: ${formatCadCents(quote.amountCents)} CAD`,
+    `Deposit due to begin: ${formatCadCents(quoteDepositDueCents(quote))} CAD`,
     "",
     quote.notes || "Scope and deliverables as discussed.",
     lines ? `\nLine items:\n${lines}` : "",
@@ -3457,9 +3552,14 @@ function buildQuotePlainText(quote, documents = [], { signUrl = "", payUrl = "" 
     docs ? `\nAttached:\n${docs}` : "",
     signUrl ? `\nReview & sign to approve:\n${signUrl}\n\nThis quote needs your signature before we start.` : "",
     `\n${paymentInstructionsBlock({
-      baseCents: quote.amountCents,
+      baseCents: quoteDepositDueCents(quote),
       payUrl,
       number: quote.number,
+      heading: "Deposit due to begin",
+      blurb: "This is your kickoff deposit only — the balance is invoiced later.",
+      etransferTitle: "Pay deposit via e-Transfer",
+      cardTitle: "Pay deposit by card",
+      buttonLabel: "Pay deposit by card",
     }).text}`,
     "",
     `— ${COMPANY.name} · ${COMPANY.email}`,
@@ -3922,10 +4022,17 @@ async function deliverReminder(env, { toEmail, subject, body, html, attachments,
     if (replyAddress) payload.reply_to = replyAddress;
     if (html) payload.html = html;
     if (Array.isArray(attachments) && attachments.length) {
-      payload.attachments = attachments.map((file) => ({
-        filename: file.filename,
-        content: file.content,
-      }));
+      payload.attachments = attachments.map((file) => {
+        const item = {
+          filename: file.filename,
+          content: file.content,
+        };
+        if (file.contentId) {
+          item.content_id = file.contentId;
+          item.content_disposition = "inline";
+        }
+        return item;
+      });
     }
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
@@ -4063,6 +4170,8 @@ const COMPANY = {
 };
 
 const CARD_FEE_RATE = 0.035;
+/** Default deposit asked on quotes (balance billed later on invoice). */
+const QUOTE_DEPOSIT_RATE = 0.5;
 
 function cardFeeCents(baseCents) {
   const base = Math.max(0, Math.round(Number(baseCents) || 0));
@@ -4072,6 +4181,43 @@ function cardFeeCents(baseCents) {
 function cardTotalCents(baseCents) {
   const base = Math.max(0, Math.round(Number(baseCents) || 0));
   return base + cardFeeCents(base);
+}
+
+/** Deposit due now for a quote — custom deposit_cents, else 50% of investment total. */
+function quoteDepositDueCents(quote) {
+  const amount = Math.max(
+    0,
+    Math.round(Number(quote?.amountCents ?? quote?.amount_cents) || 0)
+  );
+  const raw = quote?.depositCents ?? quote?.deposit_cents;
+  if (raw !== undefined && raw !== null && String(raw).trim() !== "") {
+    const custom = Math.round(Number(raw));
+    if (Number.isFinite(custom)) return Math.max(0, Math.min(amount, custom));
+  }
+  return Math.max(0, Math.round(amount * QUOTE_DEPOSIT_RATE));
+}
+
+function resolveQuoteDepositCents(body, amountCents, existing = null) {
+  const amount = Math.max(0, Math.round(Number(amountCents) || 0));
+  if (
+    body &&
+    (body.depositCents !== undefined ||
+      body.deposit_cents !== undefined ||
+      body.deposit !== undefined)
+  ) {
+    const raw = body.depositCents ?? body.deposit_cents ?? body.deposit;
+    if (raw === null || raw === "") {
+      return Math.round(amount * QUOTE_DEPOSIT_RATE);
+    }
+    const cents = moneyToCents(raw, {
+      alreadyCents: body.depositCents !== undefined || body.deposit_cents !== undefined,
+    });
+    return Math.max(0, Math.min(amount, cents));
+  }
+  if (existing && existing.deposit_cents != null && existing.deposit_cents !== "") {
+    return Math.max(0, Math.min(amount, Math.round(Number(existing.deposit_cents) || 0)));
+  }
+  return Math.round(amount * QUOTE_DEPOSIT_RATE);
 }
 
 function normalizeDepositMethod(value) {
@@ -4324,51 +4470,67 @@ async function enrichInvoicePayments(env, invoice) {
   };
 }
 
-function paymentInstructionsBlock({ baseCents, payUrl = "", number = "" }) {
+function paymentInstructionsBlock({
+  baseCents,
+  payUrl = "",
+  number = "",
+  heading = "How to pay",
+  blurb = "",
+  etransferTitle = "Pay via e-Transfer",
+  cardTitle = "Pay by card",
+  buttonLabel = "Pay by card",
+}) {
   const base = Math.max(0, Math.round(Number(baseCents) || 0));
   const card = cardTotalCents(base);
   const fee = cardFeeCents(base);
   const memo = number || "your quote/invoice number";
   const cardBtn = payUrl
-    ? `<a href="${escapeHtmlText(payUrl)}" style="display:inline-block;margin-top:12px;padding:12px 18px;background:#b8953e;color:#141820;text-decoration:none;font-weight:700;font-size:14px;border-radius:10px;">Pay by card · ${escapeHtmlText(formatCadCents(card))}</a>`
+    ? `<a href="${escapeHtmlText(payUrl)}" style="display:block;width:100%;box-sizing:border-box;margin-top:14px;padding:14px 16px;background:#b8953e;color:#141820;text-decoration:none;font-weight:700;font-size:15px;border-radius:10px;text-align:center;">${escapeHtmlText(buttonLabel)}</a>`
     : "";
+  const blurbHtml = blurb
+    ? `<p style="margin:0 0 12px;font-size:12px;line-height:1.45;color:#5c6570;">${escapeHtmlText(blurb)}</p>`
+    : "";
+  // Stacked (not side-by-side) so phone/Outlook don't crush text into the button.
   return {
     html: `
       <div style="margin-top:28px;">
-        <div style="font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:#8a7340;font-weight:700;margin-bottom:12px;">How to pay</div>
-        <table width="100%" cellpadding="0" cellspacing="0" role="presentation"><tr>
-          <td width="50%" style="vertical-align:top;padding:0 8px 0 0;">
-            <div style="padding:16px 16px 18px;background:#f7f2e8;border-radius:12px;border:1px solid #e0d6c4;height:100%;">
-              <div style="font-size:15px;font-weight:700;color:#1c2430;">Pay via e-Transfer</div>
+        <div style="font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:#8a7340;font-weight:700;margin-bottom:6px;">${escapeHtmlText(heading)}</div>
+        ${blurbHtml}
+        <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="margin:0 0 12px;">
+          <tr>
+            <td style="padding:16px;background:#f7f2e8;border-radius:12px;border:1px solid #e0d6c4;">
+              <div style="font-size:15px;font-weight:700;color:#1c2430;">${escapeHtmlText(etransferTitle)}</div>
               <p style="margin:8px 0 0;font-size:13px;line-height:1.5;color:#3a424c;">No extra fee.</p>
-              <p style="margin:12px 0 0;font-size:18px;font-weight:700;color:#1c2430;">${escapeHtmlText(formatCadCents(base))}</p>
-              <p style="margin:10px 0 0;font-size:13px;line-height:1.5;color:#3a424c;">
-                Send Interac to<br/>
-                <strong style="color:#1c2430;">${escapeHtmlText(COMPANY.accountingEmail)}</strong><br/>
+              <p style="margin:12px 0 0;font-size:20px;font-weight:700;color:#1c2430;word-break:break-word;">${escapeHtmlText(formatCadCents(base))}</p>
+              <p style="margin:10px 0 0;font-size:13px;line-height:1.55;color:#3a424c;word-break:break-word;">
+                Send Interac to <strong style="color:#1c2430;">${escapeHtmlText(COMPANY.accountingEmail)}</strong><br/>
                 Memo: <strong style="color:#1c2430;">${escapeHtmlText(memo)}</strong>
               </p>
-            </div>
-          </td>
-          <td width="50%" style="vertical-align:top;padding:0 0 0 8px;">
-            <div style="padding:16px 16px 18px;background:#f7f2e8;border-radius:12px;border:1px solid #e0d6c4;height:100%;">
-              <div style="font-size:15px;font-weight:700;color:#1c2430;">Pay by card</div>
+            </td>
+          </tr>
+        </table>
+        <table width="100%" cellpadding="0" cellspacing="0" role="presentation">
+          <tr>
+            <td style="padding:16px;background:#f7f2e8;border-radius:12px;border:1px solid #e0d6c4;">
+              <div style="font-size:15px;font-weight:700;color:#1c2430;">${escapeHtmlText(cardTitle)}</div>
               <p style="margin:8px 0 0;font-size:13px;line-height:1.5;color:#3a424c;">Includes 3.5% card processing (${escapeHtmlText(formatCadCents(fee))}).</p>
-              <p style="margin:12px 0 0;font-size:18px;font-weight:700;color:#1c2430;">${escapeHtmlText(formatCadCents(card))}</p>
-              <p style="margin:6px 0 0;font-size:12px;color:#5c6570;">${escapeHtmlText(formatCadCents(base))} + 3.5%</p>
+              <p style="margin:12px 0 0;font-size:20px;font-weight:700;color:#1c2430;word-break:break-word;">${escapeHtmlText(formatCadCents(card))}</p>
+              <p style="margin:6px 0 0;font-size:12px;line-height:1.45;color:#5c6570;">${escapeHtmlText(formatCadCents(base))} + 3.5%</p>
               ${cardBtn}
-            </div>
-          </td>
-        </tr></table>
+            </td>
+          </tr>
+        </table>
       </div>`,
     text: [
-      "How to pay:",
+      `${heading}:`,
+      blurb || "",
       "",
-      "Pay via e-Transfer (no fee):",
+      `${etransferTitle} (no fee):`,
       `  Amount: ${formatCadCents(base)}`,
       `  Send to: ${COMPANY.accountingEmail}`,
       `  Memo: ${memo}`,
       "",
-      "Pay by card (+3.5% processing):",
+      `${cardTitle} (+3.5% processing):`,
       `  Amount: ${formatCadCents(card)} (${formatCadCents(base)} + ${formatCadCents(fee)})`,
       payUrl ? `  Pay here: ${payUrl}` : "",
     ]
@@ -4687,7 +4849,7 @@ async function publicPayPreview(env, kind, token) {
     const row = await getQuoteByPayToken(env, token);
     if (!row) return { error: "This payment link is invalid or expired.", status: 404 };
     const quote = rowToQuote(row);
-    const baseCents = quote.amountCents;
+    const depositDueCents = quote.depositDueCents || quoteDepositDueCents(quote);
     const alreadyPaid = await quoteHasActiveDeposit(env, quote.id);
     return {
       kind: "quote",
@@ -4695,9 +4857,11 @@ async function publicPayPreview(env, kind, token) {
       title: quote.title,
       clientName: quote.clientName,
       status: quote.status,
-      baseCents,
-      cardFeeCents: cardFeeCents(baseCents),
-      cardTotalCents: cardTotalCents(baseCents),
+      amountCents: quote.amountCents,
+      depositDueCents,
+      baseCents: depositDueCents,
+      cardFeeCents: cardFeeCents(depositDueCents),
+      cardTotalCents: cardTotalCents(depositDueCents),
       accountingEmail: COMPANY.accountingEmail,
       alreadyPaid,
       company: {
@@ -4752,7 +4916,7 @@ async function startPublicCheckout(env, body, requestUrl) {
   if ((preview.baseCents || 0) < 50) {
     return { error: "Amount is too small to charge by card.", status: 400 };
   }
-  const origin = requestUrl ? new URL(requestUrl).origin : "";
+  const origin = publicAppOrigin(env, requestUrl);
   if (!origin) return { error: "Missing request origin.", status: 400 };
 
   let entityId = "";
@@ -5003,14 +5167,11 @@ function rowToInvoice(row) {
 }
 
 function buildInvoiceLetterheadHtml(invoice, { absoluteLogoUrl = "", payUrl = "" } = {}) {
-  const logo = absoluteLogoUrl
-    ? `<img src="${escapeHtmlText(absoluteLogoUrl)}" alt="Vanderven Systems" width="140" style="display:block;max-width:140px;height:auto;" />`
-    : `<div style="font-family:Georgia,serif;font-size:22px;font-weight:700;color:#1c2430;">Vanderven <span style="font-weight:500;color:#8a7340;">Systems</span></div>`;
   const rows = (invoice.lineItems || [])
     .map(
       (item) => `
       <tr>
-        <td style="padding:10px 8px;border-bottom:1px solid #e6e1d6;font-size:13px;color:#1c2430;">${escapeHtmlText(item.description)}</td>
+        <td style="padding:10px 8px;border-bottom:1px solid #e6e1d6;font-size:13px;color:#1c2430;word-break:break-word;">${escapeHtmlText(item.description)}</td>
         <td style="padding:10px 8px;border-bottom:1px solid #e6e1d6;font-size:13px;text-align:right;color:#1c2430;">${escapeHtmlText(String(item.qty))}</td>
         <td style="padding:10px 8px;border-bottom:1px solid #e6e1d6;font-size:13px;text-align:right;color:#1c2430;">${escapeHtmlText(formatCadCents(item.unitCents))}</td>
         <td style="padding:10px 8px;border-bottom:1px solid #e6e1d6;font-size:13px;text-align:right;color:#1c2430;font-weight:600;">${escapeHtmlText(formatCadCents(Math.round(item.qty * item.unitCents)))}</td>
@@ -5027,91 +5188,89 @@ function buildInvoiceLetterheadHtml(invoice, { absoluteLogoUrl = "", payUrl = ""
     .filter(Boolean)
     .map((p) => escapeHtmlText(p))
     .join("<br/>");
+  const header = emailBrandHeaderHtml({
+    logoUrl: absoluteLogoUrl,
+    kicker: "Invoice",
+    number: invoice.number,
+    detailHtml: `Issued ${escapeHtmlText(invoice.issueDate || "—")}<br/>Due ${escapeHtmlText(invoice.dueDate || "—")}`,
+  });
 
   return `<!DOCTYPE html>
-<html><head><meta charset="utf-8" /><title>Invoice ${escapeHtmlText(invoice.number)}</title></head>
-<body style="margin:0;padding:0;background:#f3f0ea;color:#1c2430;">
-  <div style="max-width:720px;margin:0 auto;padding:28px 20px;font-family:Segoe UI,Helvetica,Arial,sans-serif;">
-    <div style="background:#fffaf3;border:1px solid #ddd4c4;border-radius:14px;overflow:hidden;">
-      <div style="padding:28px 32px 22px;background:linear-gradient(135deg,#1c2430 0%,#2d3a4a 55%,#3d3424 100%);color:#f7f1e6;">
-        <table width="100%" cellpadding="0" cellspacing="0"><tr>
-          <td style="vertical-align:top;">${logo}
-            <p style="margin:10px 0 0;font-size:12px;opacity:0.85;line-height:1.45;">${escapeHtmlText(COMPANY.tagline)}<br/>${escapeHtmlText(COMPANY.location)} · ${escapeHtmlText(COMPANY.email)}</p>
-          </td>
-          <td style="vertical-align:top;text-align:right;">
-            <div style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;opacity:0.75;">Invoice</div>
-            <div style="font-size:26px;font-weight:700;margin-top:4px;">${escapeHtmlText(invoice.number)}</div>
-            <div style="margin-top:10px;font-size:12px;line-height:1.5;opacity:0.9;">
-              Issued ${escapeHtmlText(invoice.issueDate || "—")}<br/>
-              Due ${escapeHtmlText(invoice.dueDate || "—")}
-            </div>
-          </td>
-        </tr></table>
-      </div>
-      <div style="padding:28px 32px;">
-        <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:22px;"><tr>
-          <td style="vertical-align:top;width:50%;">
-            <div style="font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:#8a7340;font-weight:700;">Bill to</div>
-            <div style="margin-top:8px;font-size:14px;line-height:1.55;font-weight:600;">${billTo || "—"}</div>
-          </td>
-          <td style="vertical-align:top;width:50%;text-align:right;">
-            <div style="font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:#8a7340;font-weight:700;">For</div>
-            <div style="margin-top:8px;font-size:14px;line-height:1.55;">${escapeHtmlText(invoice.title)}</div>
-            <div style="margin-top:6px;font-size:12px;color:#5c6570;">Terms: ${escapeHtmlText(invoice.paymentTerms || "Net 15")}</div>
-          </td>
-        </tr></table>
-        <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
-          <thead>
-            <tr style="background:#f4efe4;">
-              <th align="left" style="padding:10px 8px;font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:#5c6570;">Description</th>
-              <th align="right" style="padding:10px 8px;font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:#5c6570;">Qty</th>
-              <th align="right" style="padding:10px 8px;font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:#5c6570;">Rate</th>
-              <th align="right" style="padding:10px 8px;font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:#5c6570;">Amount</th>
-            </tr>
-          </thead>
-          <tbody>${rows}</tbody>
-        </table>
-        <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:18px;">
-          <tr><td></td><td style="width:240px;">
-            <table width="100%" cellpadding="0" cellspacing="0" style="font-size:13px;">
-              <tr>
-                <td style="padding:6px 0;color:#5c6570;">Subtotal</td>
-                <td style="padding:6px 0;text-align:right;">${escapeHtmlText(formatCadCents(invoice.subtotalCents))}</td>
+<html><head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Invoice ${escapeHtmlText(invoice.number)}</title>
+</head>
+<body style="margin:0;padding:0;background:#eef1f5;color:#1c2430;">
+  <div style="max-width:640px;margin:0 auto;padding:16px 12px;font-family:Segoe UI,Helvetica,Arial,sans-serif;">
+    <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="background:#ffffff;border:1px solid #d7dde6;border-radius:12px;overflow:hidden;">
+      <tr><td>${header}</td></tr>
+      <tr>
+        <td style="padding:24px 20px;">
+          <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:22px;"><tr>
+            <td style="vertical-align:top;width:50%;padding:0 8px 12px 0;">
+              <div style="font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:#8a7340;font-weight:700;">Bill to</div>
+              <div style="margin-top:8px;font-size:14px;line-height:1.55;font-weight:600;word-break:break-word;">${billTo || "—"}</div>
+            </td>
+            <td style="vertical-align:top;width:50%;padding:0 0 12px 8px;">
+              <div style="font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:#8a7340;font-weight:700;">For</div>
+              <div style="margin-top:8px;font-size:14px;line-height:1.55;word-break:break-word;">${escapeHtmlText(invoice.title)}</div>
+              <div style="margin-top:6px;font-size:12px;color:#5c6570;">Terms: ${escapeHtmlText(invoice.paymentTerms || "Net 15")}</div>
+            </td>
+          </tr></table>
+          <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+            <thead>
+              <tr style="background:#f4efe4;">
+                <th align="left" style="padding:10px 8px;font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:#5c6570;">Description</th>
+                <th align="right" style="padding:10px 8px;font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:#5c6570;">Qty</th>
+                <th align="right" style="padding:10px 8px;font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:#5c6570;">Rate</th>
+                <th align="right" style="padding:10px 8px;font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:#5c6570;">Amount</th>
               </tr>
-              <tr>
-                <td style="padding:6px 0;color:#5c6570;">Tax (${escapeHtmlText(String(invoice.taxRate))}%)</td>
-                <td style="padding:6px 0;text-align:right;">${escapeHtmlText(formatCadCents(invoice.taxCents))}</td>
-              </tr>
-              ${
-                Number(invoice.depositAvailableCents) > 0
-                  ? `<tr>
-                <td style="padding:6px 0;color:#5c6570;">Deposit applied</td>
-                <td style="padding:6px 0;text-align:right;">−${escapeHtmlText(formatCadCents(invoice.depositAvailableCents))}</td>
-              </tr>`
-                  : ""
-              }
-              <tr>
-                <td style="padding:12px 0 0;font-size:15px;font-weight:700;border-top:2px solid #1c2430;">Balance due</td>
-                <td style="padding:12px 0 0;text-align:right;font-size:15px;font-weight:700;border-top:2px solid #1c2430;">${escapeHtmlText(formatCadCents(invoice.balanceDueCents ?? invoice.amountCents))}</td>
-              </tr>
-            </table>
-          </td></tr>
-        </table>
-        ${
-          invoice.notes
-            ? `<div style="margin-top:22px;padding:14px 16px;background:#f7f2e8;border-radius:10px;font-size:12px;line-height:1.5;color:#3a424c;"><strong style="display:block;margin-bottom:4px;color:#8a7340;">Notes</strong>${escapeHtmlText(invoice.notes)}</div>`
-            : ""
-        }
-        ${paymentInstructionsBlock({
-          baseCents: invoice.balanceDueCents ?? invoice.amountCents,
-          payUrl,
-          number: invoice.number,
-        }).html}
-        <div style="margin-top:28px;padding-top:16px;border-top:1px solid #e6e1d6;font-size:12px;color:#5c6570;line-height:1.55;">
-          Thank you for your business — ${escapeHtmlText(COMPANY.name)} · ${escapeHtmlText(COMPANY.web)}
-        </div>
-      </div>
-    </div>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+          <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:18px;">
+            <tr><td></td><td style="width:240px;max-width:100%;">
+              <table width="100%" cellpadding="0" cellspacing="0" style="font-size:13px;">
+                <tr>
+                  <td style="padding:6px 0;color:#5c6570;">Subtotal</td>
+                  <td style="padding:6px 0;text-align:right;">${escapeHtmlText(formatCadCents(invoice.subtotalCents))}</td>
+                </tr>
+                <tr>
+                  <td style="padding:6px 0;color:#5c6570;">Tax (${escapeHtmlText(String(invoice.taxRate))}%)</td>
+                  <td style="padding:6px 0;text-align:right;">${escapeHtmlText(formatCadCents(invoice.taxCents))}</td>
+                </tr>
+                ${
+                  Number(invoice.depositAvailableCents) > 0
+                    ? `<tr>
+                  <td style="padding:6px 0;color:#5c6570;">Deposit applied</td>
+                  <td style="padding:6px 0;text-align:right;">−${escapeHtmlText(formatCadCents(invoice.depositAvailableCents))}</td>
+                </tr>`
+                    : ""
+                }
+                <tr>
+                  <td style="padding:12px 0 0;font-size:15px;font-weight:700;border-top:2px solid #1c2430;">Balance due</td>
+                  <td style="padding:12px 0 0;text-align:right;font-size:15px;font-weight:700;border-top:2px solid #1c2430;">${escapeHtmlText(formatCadCents(invoice.balanceDueCents ?? invoice.amountCents))}</td>
+                </tr>
+              </table>
+            </td></tr>
+          </table>
+          ${
+            invoice.notes
+              ? `<div style="margin-top:22px;padding:14px 16px;background:#f7f2e8;border-radius:10px;font-size:12px;line-height:1.5;color:#3a424c;word-break:break-word;"><strong style="display:block;margin-bottom:4px;color:#8a7340;">Notes</strong>${escapeHtmlText(invoice.notes)}</div>`
+              : ""
+          }
+          ${paymentInstructionsBlock({
+            baseCents: invoice.balanceDueCents ?? invoice.amountCents,
+            payUrl,
+            number: invoice.number,
+          }).html}
+          <div style="margin-top:28px;padding-top:16px;border-top:1px solid #e6e1d6;font-size:12px;color:#5c6570;line-height:1.55;">
+            Thank you for your business — ${escapeHtmlText(COMPANY.name)} · ${escapeHtmlText(COMPANY.web)}
+          </div>
+        </td>
+      </tr>
+    </table>
   </div>
 </body></html>`;
 }
@@ -5236,7 +5395,7 @@ async function getQuoteBySignToken(env, token) {
 
 function publicQuotePayload(row, { payUrl = "" } = {}) {
   const quote = rowToQuote(row, { includeSignature: true });
-  const baseCents = quote.amountCents;
+  const depositDueCents = quote.depositDueCents || quoteDepositDueCents(quote);
   return {
     number: quote.number,
     title: quote.title,
@@ -5247,9 +5406,11 @@ function publicQuotePayload(row, { payUrl = "" } = {}) {
     discountNote: quote.discountNote || "",
     amountCents: quote.amountCents,
     amountLabel: formatCadCents(quote.amountCents),
-    cardFeeCents: cardFeeCents(baseCents),
-    cardTotalCents: cardTotalCents(baseCents),
-    cardTotalLabel: formatCadCents(cardTotalCents(baseCents)),
+    depositDueCents,
+    depositDueLabel: formatCadCents(depositDueCents),
+    cardFeeCents: cardFeeCents(depositDueCents),
+    cardTotalCents: cardTotalCents(depositDueCents),
+    cardTotalLabel: formatCadCents(cardTotalCents(depositDueCents)),
     payUrl: payUrl || "",
     accountingEmail: COMPANY.accountingEmail,
     lineItems: quote.lineItems || [],
@@ -5364,7 +5525,7 @@ async function markQuoteClientViewed(env, row) {
 
 async function publicQuotePayloadWithPay(env, row, requestUrl = "") {
   const payToken = row.pay_token || (await issueEntityPayToken(env, "quotes", row.id));
-  const origin = requestUrl ? new URL(requestUrl).origin : "";
+  const origin = publicAppOrigin(env, requestUrl);
   const payUrl = origin && payToken ? `${origin}/pay/q/${encodeURIComponent(payToken)}` : "";
   return publicQuotePayload(row, { payUrl });
 }
@@ -5499,33 +5660,65 @@ async function createQuote(env, body) {
     cleanText(body.ownerEmail ?? body.owner_email, 160) || settings.ownerEmail || "";
   const sentAt = status === "sent" ? ts : null;
   const pricing = resolveQuotePricing(body, null);
-  await env.DB.prepare(
-    `INSERT INTO quotes
-      (id, lead_id, number, title, client_name, status, amount_cents, notes, terms, addendums,
-       line_items_json, discount_cents, discount_label, discount_note, sent_at, owner_email, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  )
-    .bind(
-      id,
-      leadId,
-      number,
-      title,
-      cleanText(body.clientName ?? body.client_name, 160),
-      status,
-      pricing.amountCents,
-      cleanText(body.notes, 4000),
-      pricing.terms,
-      pricing.addendums,
-      JSON.stringify(pricing.lineItems),
-      pricing.discountCents,
-      pricing.discountLabel,
-      pricing.discountNote,
-      sentAt,
-      ownerEmail,
-      ts,
-      ts
+  const depositCents = resolveQuoteDepositCents(body, pricing.amountCents, null);
+  try {
+    await env.DB.prepare(
+      `INSERT INTO quotes
+        (id, lead_id, number, title, client_name, status, amount_cents, deposit_cents, notes, terms, addendums,
+         line_items_json, discount_cents, discount_label, discount_note, sent_at, owner_email, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
-    .run();
+      .bind(
+        id,
+        leadId,
+        number,
+        title,
+        cleanText(body.clientName ?? body.client_name, 160),
+        status,
+        pricing.amountCents,
+        depositCents,
+        cleanText(body.notes, 4000),
+        pricing.terms,
+        pricing.addendums,
+        JSON.stringify(pricing.lineItems),
+        pricing.discountCents,
+        pricing.discountLabel,
+        pricing.discountNote,
+        sentAt,
+        ownerEmail,
+        ts,
+        ts
+      )
+      .run();
+  } catch {
+    await env.DB.prepare(
+      `INSERT INTO quotes
+        (id, lead_id, number, title, client_name, status, amount_cents, notes, terms, addendums,
+         line_items_json, discount_cents, discount_label, discount_note, sent_at, owner_email, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+      .bind(
+        id,
+        leadId,
+        number,
+        title,
+        cleanText(body.clientName ?? body.client_name, 160),
+        status,
+        pricing.amountCents,
+        cleanText(body.notes, 4000),
+        pricing.terms,
+        pricing.addendums,
+        JSON.stringify(pricing.lineItems),
+        pricing.discountCents,
+        pricing.discountLabel,
+        pricing.discountNote,
+        sentAt,
+        ownerEmail,
+        ts,
+        ts
+      )
+      .run();
+  }
   const documentIds =
     body.documentIds !== undefined || body.document_ids !== undefined
       ? body.documentIds ?? body.document_ids
@@ -5565,6 +5758,7 @@ async function updateQuote(env, id, body) {
   if (status === "draft") sentAt = existing.sent_at || null;
 
   const pricing = resolveQuotePricing(body, existing);
+  const depositCents = resolveQuoteDepositCents(body, pricing.amountCents, existing);
   const updated = {
     lead_id:
       body.leadId !== undefined || body.lead_id !== undefined
@@ -5578,6 +5772,7 @@ async function updateQuote(env, id, body) {
         : existing.client_name,
     status,
     amount_cents: pricing.amountCents,
+    deposit_cents: depositCents,
     notes: body.notes !== undefined ? cleanText(body.notes, 4000) : existing.notes,
     terms: pricing.terms,
     addendums: pricing.addendums,
@@ -5592,34 +5787,66 @@ async function updateQuote(env, id, body) {
         : existing.owner_email || "",
     updated_at: nowIso(),
   };
-  await env.DB.prepare(
-    `UPDATE quotes SET
-      lead_id = ?, number = ?, title = ?, client_name = ?, status = ?, amount_cents = ?,
-      notes = ?, terms = ?, addendums = ?, line_items_json = ?,
-      discount_cents = ?, discount_label = ?, discount_note = ?,
-      sent_at = ?, owner_email = ?, updated_at = ?
-     WHERE id = ?`
-  )
-    .bind(
-      updated.lead_id,
-      updated.number,
-      updated.title,
-      updated.client_name,
-      updated.status,
-      updated.amount_cents,
-      updated.notes,
-      updated.terms,
-      updated.addendums,
-      updated.line_items_json,
-      updated.discount_cents,
-      updated.discount_label,
-      updated.discount_note,
-      updated.sent_at,
-      updated.owner_email,
-      updated.updated_at,
-      id
+  try {
+    await env.DB.prepare(
+      `UPDATE quotes SET
+        lead_id = ?, number = ?, title = ?, client_name = ?, status = ?, amount_cents = ?, deposit_cents = ?,
+        notes = ?, terms = ?, addendums = ?, line_items_json = ?,
+        discount_cents = ?, discount_label = ?, discount_note = ?,
+        sent_at = ?, owner_email = ?, updated_at = ?
+       WHERE id = ?`
     )
-    .run();
+      .bind(
+        updated.lead_id,
+        updated.number,
+        updated.title,
+        updated.client_name,
+        updated.status,
+        updated.amount_cents,
+        updated.deposit_cents,
+        updated.notes,
+        updated.terms,
+        updated.addendums,
+        updated.line_items_json,
+        updated.discount_cents,
+        updated.discount_label,
+        updated.discount_note,
+        updated.sent_at,
+        updated.owner_email,
+        updated.updated_at,
+        id
+      )
+      .run();
+  } catch {
+    await env.DB.prepare(
+      `UPDATE quotes SET
+        lead_id = ?, number = ?, title = ?, client_name = ?, status = ?, amount_cents = ?,
+        notes = ?, terms = ?, addendums = ?, line_items_json = ?,
+        discount_cents = ?, discount_label = ?, discount_note = ?,
+        sent_at = ?, owner_email = ?, updated_at = ?
+       WHERE id = ?`
+    )
+      .bind(
+        updated.lead_id,
+        updated.number,
+        updated.title,
+        updated.client_name,
+        updated.status,
+        updated.amount_cents,
+        updated.notes,
+        updated.terms,
+        updated.addendums,
+        updated.line_items_json,
+        updated.discount_cents,
+        updated.discount_label,
+        updated.discount_note,
+        updated.sent_at,
+        updated.owner_email,
+        updated.updated_at,
+        id
+      )
+      .run();
+  }
   if (body.documentIds !== undefined || body.document_ids !== undefined) {
     await setQuoteDocumentIds(env, id, body.documentIds ?? body.document_ids);
   }
@@ -5664,8 +5891,13 @@ async function sendQuote(env, id, requestUrl, senderUser = null) {
     .all()
     .then((r) => r.results || [])
     .catch(() => []);
-  const origin = requestUrl ? new URL(requestUrl).origin : "";
-  const logoUrl = origin ? `${origin}/public/logo-mark-nav-transparent.png` : "";
+  const origin = publicAppOrigin(env, requestUrl);
+  const logoInline = await logoInlineAttachment(env);
+  const logoUrl = logoInline
+    ? "cid:vds-logo"
+    : origin
+      ? `${origin}/public/logo-mark-nav-transparent.png`
+      : "";
   const signUrl = origin ? `${origin}/sign/q/${encodeURIComponent(signToken)}` : "";
   const payUrl =
     origin && payToken ? `${origin}/pay/q/${encodeURIComponent(payToken)}` : "";
@@ -5690,7 +5922,11 @@ async function sendQuote(env, id, requestUrl, senderUser = null) {
   const uploadedAttachments = (
     await Promise.all(fileRows.map((row) => quoteFileAttachmentPayload(env, row)))
   ).filter(Boolean);
-  const attachments = [...libraryAttachments, ...uploadedAttachments];
+  const attachments = [
+    ...libraryAttachments,
+    ...uploadedAttachments,
+    ...(logoInline ? [logoInline] : []),
+  ];
   const delivery = await deliverReminder(env, {
     toEmail,
     subject: `Quote ${quote.number} from ${COMPANY.name} — review & sign`,
@@ -5977,8 +6213,13 @@ async function sendInvoice(env, id, requestUrl, senderUser = null) {
     return { error: "Add a bill-to email before sending.", status: 400 };
   }
   const payToken = await issueEntityPayToken(env, "invoices", id);
-  const origin = requestUrl ? new URL(requestUrl).origin : "";
-  const logoUrl = origin ? `${origin}/public/logo-mark-nav.png` : "";
+  const origin = publicAppOrigin(env, requestUrl);
+  const logoInline = await logoInlineAttachment(env);
+  const logoUrl = logoInline
+    ? "cid:vds-logo"
+    : origin
+      ? `${origin}/public/logo-mark-nav-transparent.png`
+      : "";
   const payUrl =
     origin && payToken ? `${origin}/pay/i/${encodeURIComponent(payToken)}` : "";
   const html = buildInvoiceLetterheadHtml(invoice, { absoluteLogoUrl: logoUrl, payUrl });
@@ -5988,6 +6229,7 @@ async function sendInvoice(env, id, requestUrl, senderUser = null) {
     subject: `Invoice ${invoice.number} from ${COMPANY.name}`,
     body: text,
     html,
+    attachments: logoInline ? [logoInline] : [],
     from: formatOutboundFrom(senderUser, env),
     replyTo: senderUser?.email || "",
   });
@@ -6772,7 +7014,7 @@ async function handleApi(request, env) {
     if (!row) return json({ error: "This signing link is invalid or expired." }, { status: 404 });
     row = (await markQuoteClientViewed(env, row)) || row;
     const payToken = row.pay_token || (await issueEntityPayToken(env, "quotes", row.id));
-    const origin = new URL(request.url).origin;
+    const origin = publicAppOrigin(env, request.url);
     const payUrl = payToken ? `${origin}/pay/q/${encodeURIComponent(payToken)}` : "";
     return json({ quote: publicQuotePayload(row, { payUrl }) });
   }
@@ -7167,7 +7409,7 @@ async function handleAuthedApi(request, env, sessionUser, url, path, method) {
     if (!token) {
       return json({ error: "Pay links need migration 0029 applied." }, { status: 503 });
     }
-    const origin = new URL(request.url).origin;
+    const origin = publicAppOrigin(env, request.url);
     return json({
       token,
       payUrl: `${origin}/pay/q/${encodeURIComponent(token)}`,
@@ -7186,7 +7428,7 @@ async function handleAuthedApi(request, env, sessionUser, url, path, method) {
     if (!token) {
       return json({ error: "Pay links need migration 0029 applied." }, { status: 503 });
     }
-    const origin = new URL(request.url).origin;
+    const origin = publicAppOrigin(env, request.url);
     return json({
       token,
       payUrl: `${origin}/pay/i/${encodeURIComponent(token)}`,

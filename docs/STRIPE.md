@@ -14,14 +14,16 @@ Production: `npx wrangler versions secret put STRIPE_SECRET_KEY` (and publishabl
 ## Behaviour
 
 - **Card:** charges base × **1.035**. CRM credit/deposit uses the **base** amount only.
-- **Quote card payment:** creates a **received** deposit on the client (editable in CRM).
+- **Quote card payment:** charges the **deposit due** (default **50%** of investment total; editable on the quote), then creates a **received** deposit on the client. Balance is invoiced later.
 - **Invoice:** balance due = invoice total − received deposits. Card charges the balance (+3.5%). Paying marks invoice **paid** and applies deposits.
 - **Interac e-Transfer:** face value, no fee → **accounting@vanderven.ca** (memo = quote/invoice number). Mark received manually under client Deposits.
 
+Public app host: `https://app.vanderven.ca` (also still on `*.workers.dev`).
+
 Public pages:
 
-- Quote deposit: `/pay/q/:token`
-- Invoice: `/pay/i/:token`
+- Quote deposit: `https://app.vanderven.ca/pay/q/:token`
+- Invoice: `https://app.vanderven.ca/pay/i/:token`
 
 ## Webhook setup (required for card → CRM)
 

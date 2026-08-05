@@ -242,8 +242,12 @@
   const cardFeeCents = (base) => Math.round(Math.max(0, Number(base) || 0) * CARD_FEE_RATE);
   const cardTotalCents = (base) => Math.max(0, Number(base) || 0) + cardFeeCents(base);
 
+  const QUOTE_DEPOSIT_RATE = 0.5;
+  const defaultQuoteDepositCents = (amountCents) =>
+    Math.max(0, Math.round((Number(amountCents) || 0) * QUOTE_DEPOSIT_RATE));
+
   const DEFAULT_QUOTE_TERMS = [
-    "Payment: deposit due to begin (see How to pay on this quote); balance on delivery of approved scope.",
+    "Payment: 50% deposit to begin (see How to pay); balance on delivery of approved scope.",
     "Timeline: dates are estimates and depend on timely client feedback and asset delivery.",
     "Scope changes: work outside this quote is billed separately or via a revised quote.",
     "Ownership: final deliverables transfer on full payment.",
@@ -5438,6 +5442,23 @@
     return Math.max(0, centsFromInput(els.quoteForm.discount.value));
   }
 
+  function readQuoteDepositCents(amountCents) {
+    const amount = Math.max(0, Number(amountCents) || 0);
+    if (!els.quoteForm?.deposit) return defaultQuoteDepositCents(amount);
+    const raw = Math.max(0, centsFromInput(els.quoteForm.deposit.value));
+    return Math.max(0, Math.min(amount, raw));
+  }
+
+  function quoteDepositFieldIsManual() {
+    return els.quoteForm?.deposit?.dataset?.manual === "1";
+  }
+
+  function setQuoteDepositField(cents, { manual = false } = {}) {
+    if (!els.quoteForm?.deposit) return;
+    els.quoteForm.deposit.value = dollarsFromCents(Math.max(0, Number(cents) || 0));
+    els.quoteForm.deposit.dataset.manual = manual ? "1" : "0";
+  }
+
   function quotePricingFrom(lines, discountCents = 0) {
     const subtotalCents = quoteLinesTotalCents(lines);
     const safeDiscount = Math.max(0, Math.min(subtotalCents, Number(discountCents) || 0));
@@ -5455,6 +5476,14 @@
     }
     if (els.quoteTotalDisplay) {
       els.quoteTotalDisplay.textContent = formatMoneyExact(pricing.amountCents);
+    }
+    if (els.quoteForm?.deposit && !quoteDepositFieldIsManual()) {
+      setQuoteDepositField(defaultQuoteDepositCents(pricing.amountCents), { manual: false });
+    } else if (els.quoteForm?.deposit) {
+      const capped = readQuoteDepositCents(pricing.amountCents);
+      if (centsFromInput(els.quoteForm.deposit.value) !== capped) {
+        els.quoteForm.deposit.value = dollarsFromCents(capped);
+      }
     }
   }
 
@@ -5523,6 +5552,7 @@
     const discountCents = readQuoteDiscountCents();
     const pricing = quotePricingFrom(lineItems, discountCents);
     updateQuoteTotalDisplay(lineItems);
+    const depositDueCents = readQuoteDepositCents(pricing.amountCents);
     const id = form.get("id") || "";
     const existingNumber = String(form.get("number") || "").trim();
     return {
@@ -5536,6 +5566,8 @@
       discountLabel: String(form.get("discountLabel") || "").trim(),
       discountNote: String(form.get("discountNote") || "").trim(),
       amountCents: pricing.amountCents,
+      depositCents: depositDueCents,
+      depositDueCents,
       lineItems,
       notes: String(form.get("notes") || "").trim(),
       terms: String(form.get("terms") || "").trim(),
@@ -5559,6 +5591,7 @@
       leadId: draft.leadId || null,
       status: draft.status,
       amount: dollarsFromCents(draft.amountCents),
+      deposit: dollarsFromCents(draft.depositDueCents),
       discount: dollarsFromCents(draft.discountCents),
       discountLabel: draft.discountLabel,
       discountNote: draft.discountNote,
@@ -5604,6 +5637,17 @@
       Math.min(subtotalCents, Number(quote.discountCents) || 0)
     );
     const chargeCents = Math.max(0, subtotalCents - discountCents);
+    const depositDueCents = Math.max(
+      0,
+      Math.min(
+        chargeCents,
+        quote.depositDueCents != null
+          ? Number(quote.depositDueCents)
+          : quote.depositCents != null
+            ? Number(quote.depositCents)
+            : defaultQuoteDepositCents(chargeCents)
+      )
+    );
     const discountLabel = quote.discountLabel || "Discount";
     const lead =
       (quote.leadId && (state.leads || []).find((l) => l.id === quote.leadId)) ||
@@ -5716,22 +5760,25 @@
             : `<div class="invoice-sheet__notes"><p class="muted">No attachments selected for this quote.</p></div>`
         }
         <div class="quote-sheet__pay">
-          <span class="invoice-sheet__label">How to pay</span>
+          <span class="invoice-sheet__label">Deposit due to begin</span>
+          <p class="muted" style="margin:0.35rem 0 0">Kickoff deposit only (${escapeHtml(
+            formatMoneyExact(depositDueCents)
+          )} of ${escapeHtml(formatMoneyExact(chargeCents))} investment). Balance is invoiced later.</p>
           <div class="quote-sheet__pay-grid">
             <div class="quote-sheet__pay-option">
-              <strong>Pay via e-Transfer</strong>
-              <p class="quote-sheet__pay-amount">${escapeHtml(formatMoneyExact(chargeCents))} <span class="muted">CAD</span></p>
+              <strong>Pay deposit via e-Transfer</strong>
+              <p class="quote-sheet__pay-amount">${escapeHtml(formatMoneyExact(depositDueCents))} <span class="muted">CAD</span></p>
               <p class="muted">No extra fee. Send Interac to <strong>${escapeHtml(
                 COMPANY.accountingEmail
               )}</strong>. Memo: <strong>${escapeHtml(quote.number || "quote number")}</strong>.</p>
             </div>
             <div class="quote-sheet__pay-option">
-              <strong>Pay by card</strong>
+              <strong>Pay deposit by card</strong>
               <p class="quote-sheet__pay-amount">${escapeHtml(
-                formatMoneyExact(cardTotalCents(chargeCents))
+                formatMoneyExact(cardTotalCents(depositDueCents))
               )} <span class="muted">CAD</span></p>
-              <p class="muted">${escapeHtml(formatMoneyExact(chargeCents))} + 3.5% processing (${escapeHtml(
-                formatMoneyExact(cardFeeCents(chargeCents))
+              <p class="muted">${escapeHtml(formatMoneyExact(depositDueCents))} + 3.5% processing (${escapeHtml(
+                formatMoneyExact(cardFeeCents(depositDueCents))
               )}). Use <strong>Copy pay link</strong> / Send for the card checkout URL.</p>
             </div>
           </div>
@@ -5760,7 +5807,7 @@
     const styles = `
       body{margin:0;background:#fff;color:#1c2430;font-family:Segoe UI,Helvetica,Arial,sans-serif;}
       .invoice-sheet{max-width:760px;margin:0 auto;padding:28px;}
-      .invoice-sheet__brand{display:flex;justify-content:space-between;gap:1rem;align-items:center;padding:1.1rem 1.25rem;background:linear-gradient(135deg,#1c2430,#2d3a4a 55%,#3d3424);color:#f7f1e6;border-radius:12px;}
+      .invoice-sheet__brand{display:flex;justify-content:space-between;gap:1rem;align-items:center;padding:1.1rem 1.25rem;background:#1f3a5f;color:#f4f7fb;border-radius:12px;}
       .quote-sheet__brand-left{display:flex;flex-direction:column;align-items:flex-start;gap:0.45rem;}
       .quote-sheet__brand-row{display:flex;align-items:center;gap:0.75rem;}
       .quote-sheet__logo,.invoice-sheet__brand-left img{width:72px;height:auto;background:transparent!important;border-radius:0;padding:0;}
@@ -5925,6 +5972,17 @@
               unitCents: quote.amountCents || 0,
             }),
           ];
+    const openAmount =
+      Number(quote.amountCents) ||
+      Math.max(0, (Number(quote.subtotalCents) || 0) - (Number(quote.discountCents) || 0));
+    const openDeposit =
+      quote.depositDueCents != null
+        ? Number(quote.depositDueCents)
+        : quote.depositCents != null
+          ? Number(quote.depositCents)
+          : defaultQuoteDepositCents(openAmount);
+    const depositIsDefault = openDeposit === defaultQuoteDepositCents(openAmount);
+    setQuoteDepositField(openDeposit, { manual: !depositIsDefault });
     renderQuoteLines(lines);
     renderQuoteAttachments(quote.documentIds || []);
     setQuoteFiles(quote.files || []);
@@ -5949,6 +6007,7 @@
     if (els.quoteForm.discount) els.quoteForm.discount.value = "0";
     if (els.quoteForm.discountLabel) els.quoteForm.discountLabel.value = "";
     if (els.quoteForm.discountNote) els.quoteForm.discountNote.value = "";
+    setQuoteDepositField(0, { manual: false });
     if (els.quoteForm.leadId) els.quoteForm.leadId.value = leadId || "";
     if (clientName) els.quoteForm.clientName.value = clientName;
     fillQuoteLeadPicker(leadId || "");
@@ -6346,7 +6405,7 @@
     const styles = `
       body{margin:0;background:#fff;color:#1c2430;font-family:Segoe UI,Helvetica,Arial,sans-serif;}
       .invoice-sheet{max-width:760px;margin:0 auto;padding:28px;}
-      .invoice-sheet__brand{display:flex;justify-content:space-between;gap:1rem;padding:1.25rem 1.35rem;background:linear-gradient(135deg,#1c2430,#2d3a4a 55%,#3d3424);color:#f7f1e6;border-radius:12px;}
+      .invoice-sheet__brand{display:flex;justify-content:space-between;gap:1rem;padding:1.25rem 1.35rem;background:#1f3a5f;color:#f4f7fb;border-radius:12px;}
       .invoice-sheet__brand-left{display:flex;gap:0.75rem;align-items:center;}
       .invoice-sheet__brand-left img{width:72px;height:auto;background:#fff;border-radius:8px;padding:0.25rem;}
       .invoice-sheet__brand-left strong{display:block;font-size:1.2rem;}
@@ -7017,8 +7076,18 @@
     }
   });
 
-  els.quoteForm.addEventListener("input", () => refreshQuotePreview());
-  els.quoteForm.addEventListener("change", () => refreshQuotePreview());
+  els.quoteForm.addEventListener("input", (event) => {
+    if (event.target?.name === "deposit" && els.quoteForm?.deposit) {
+      els.quoteForm.deposit.dataset.manual = "1";
+    }
+    refreshQuotePreview();
+  });
+  els.quoteForm.addEventListener("change", (event) => {
+    if (event.target?.name === "deposit" && els.quoteForm?.deposit) {
+      els.quoteForm.deposit.dataset.manual = "1";
+    }
+    refreshQuotePreview();
+  });
 
   els.printQuote?.addEventListener("click", () => printQuoteDocument());
 
