@@ -31,7 +31,13 @@
       }
       .wrap { max-width: 640px; margin: 0 auto; padding: 2rem 1.15rem 3rem; }
       .brand { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1.25rem; }
-      .brand img { width: 42px; height: 42px; }
+      .brand img {
+        width: 56px;
+        height: auto;
+        max-height: 40px;
+        object-fit: contain;
+        display: block;
+      }
       .brand span { font-family: var(--font-display); font-size: 1.55rem; font-weight: 600; }
       .card {
         background: #fffaf3;
@@ -108,7 +114,7 @@
   <body>
     <div class="wrap">
       <div class="brand">
-        <img src="/public/logo-mark-nav.png" alt="" width="42" height="42" />
+        <img src="/public/logo-mark-nav-transparent.png" alt="Vanderven Systems" width="56" height="33" />
         <span>Vanderven Systems</span>
       </div>
 

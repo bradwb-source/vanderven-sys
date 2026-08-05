@@ -1282,6 +1282,110 @@
     return "";
   }
 
+  let suppressRouteWrite = false;
+  const ROUTE_STORAGE_KEY = "vs_crm_route";
+
+  function cleanRouteId(value) {
+    return String(value || "")
+      .trim()
+      .slice(0, 80);
+  }
+
+  function readStoredRoute() {
+    try {
+      const raw = sessionStorage.getItem(ROUTE_STORAGE_KEY);
+      if (!raw) return null;
+      const data = JSON.parse(raw);
+      const view = String(data?.view || "").toLowerCase();
+      if (!VIEW_COPY[view]) return null;
+      return { view, id: cleanRouteId(data?.id) };
+    } catch {
+      return null;
+    }
+  }
+
+  function storeRoute(view, id = "") {
+    try {
+      sessionStorage.setItem(
+        ROUTE_STORAGE_KEY,
+        JSON.stringify({ view: VIEW_COPY[view] ? view : "home", id: cleanRouteId(id) })
+      );
+    } catch {
+      /* ignore quota / private mode */
+    }
+  }
+
+  function parseAppRoute() {
+    const raw = String(location.hash || "").replace(/^#/, "").trim();
+    if (raw) {
+      const qIdx = raw.indexOf("?");
+      const viewPart = (qIdx >= 0 ? raw.slice(0, qIdx) : raw).trim().toLowerCase();
+      const query = qIdx >= 0 ? raw.slice(qIdx + 1) : "";
+      const params = new URLSearchParams(query);
+      const view = VIEW_COPY[viewPart] ? viewPart : "home";
+      return { view, id: cleanRouteId(params.get("id")) };
+    }
+    return readStoredRoute() || { view: "home", id: "" };
+  }
+
+  function writeAppRoute(view = state.view, id = "") {
+    if (suppressRouteWrite) return;
+    const nextView = VIEW_COPY[view] ? view : "home";
+    const nextId = cleanRouteId(id);
+    storeRoute(nextView, nextId);
+    let next = `#${nextView}`;
+    if (nextId) next += `?id=${encodeURIComponent(nextId)}`;
+    if (location.hash === next) return;
+    const url = `${location.pathname}${location.search}${next}`;
+    try {
+      history.replaceState(null, "", url);
+    } catch {
+      location.hash = next;
+    }
+  }
+
+  function routeIdForOpenDrawers() {
+    if (els.clientDrawer?.classList.contains("is-open")) {
+      return state.clientDetail?.lead?.id || els.form?.id?.value || "";
+    }
+    if (els.jobDrawer?.classList.contains("is-open")) return els.jobForm?.id?.value || "";
+    if (els.quoteDrawer?.classList.contains("is-open")) return els.quoteForm?.id?.value || "";
+    if (els.invoiceDrawer?.classList.contains("is-open")) return els.invoiceForm?.id?.value || "";
+    return "";
+  }
+
+  async function applyAppRoute({ allowOpen = true } = {}) {
+    const { view, id } = parseAppRoute();
+    suppressRouteWrite = true;
+    try {
+      if (state.view !== view) setView(view);
+      else writeAppRoute(view, allowOpen ? id : "");
+      if (!allowOpen || !id) return;
+      if (view === "clients" || view === "requests" || view === "pipeline") {
+        await openLead(id);
+        return;
+      }
+      if (view === "jobs" || view === "schedule" || view === "home") {
+        openJob(id);
+        return;
+      }
+      if (view === "quotes") {
+        await openQuote(id);
+        return;
+      }
+      if (view === "invoices") {
+        openInvoice(id);
+        return;
+      }
+      if (view === "vera") {
+        await openVeraChat(id);
+      }
+    } finally {
+      suppressRouteWrite = false;
+      writeAppRoute(state.view, routeIdForOpenDrawers());
+    }
+  }
+
   function applyViewHeader(view = state.view) {
     const copy = VIEW_COPY[view];
     if (!copy || !els.title || !els.sub) return;
@@ -1365,6 +1469,7 @@
     if (createMenu) createMenu.hidden = view === "pdf";
     if (view === "pdf") closeCreateMenu();
 
+    writeAppRoute(view, "");
     renderFilters();
     render();
     if (view === "vera") {
@@ -2846,7 +2951,9 @@
     try {
       const data = await api(`/api/vera-chats/${encodeURIComponent(id)}`);
       state.veraDetail = data;
-      renderVera();
+      if (state.view !== "vera") setView("vera");
+      else renderVera();
+      writeAppRoute("vera", id);
     } catch (err) {
       toast(err.message || "Could not open chat");
     }
@@ -3742,6 +3849,7 @@
     setTimeout(() => {
       if (allDrawers().every((d) => !d.classList.contains("is-open"))) els.backdrop.hidden = true;
     }, 200);
+    writeAppRoute(state.view, "");
   }
 
   function openOnly(drawer, { create = false, deleteBtn } = {}) {
@@ -4761,6 +4869,7 @@
     els.clientDrawerMeta.textContent = `${stageLabel(lead.stage)} · Loading history…`;
     els.clientDetailBody.innerHTML = `<p class="muted">Loading client history…</p>`;
     openOnly(els.clientDrawer);
+    writeAppRoute(state.view === "requests" ? "requests" : state.view === "pipeline" ? "pipeline" : "clients", id);
     try {
       const detail = await api(`/api/leads/${encodeURIComponent(id)}/detail`);
       state.clientDetail = detail;
@@ -5157,6 +5266,10 @@
     els.jobForm.status.value = job.status || "unscheduled";
     els.jobForm.notes.value = job.notes || "";
     openOnly(els.jobDrawer, { create: false, deleteBtn: els.deleteJob });
+    writeAppRoute(
+      state.view === "schedule" || state.view === "home" || state.view === "jobs" ? state.view : "jobs",
+      id
+    );
     loadJobContext(job);
   }
 
@@ -5989,6 +6102,7 @@
     renderQuoteSignaturePanel(quote);
     refreshQuotePreview();
     openOnly(els.quoteDrawer, { create: false, deleteBtn: els.deleteQuote });
+    writeAppRoute("quotes", id);
   }
 
   function openNewQuote({ leadId = "", clientName = "" } = {}) {
@@ -6523,6 +6637,7 @@
           ];
     renderInvoiceLines(lines);
     openOnly(els.invoiceDrawer, { create: false, deleteBtn: els.deleteInvoice });
+    writeAppRoute("invoices", id);
   }
 
   function openNewInvoice({ leadId = "", clientName = "", quoteId = "", jobId = "" } = {}) {
@@ -7294,14 +7409,26 @@
 
   mountRewriteControls(document);
   startIdleWatch();
+  window.addEventListener("hashchange", () => {
+    applyAppRoute().catch((err) => console.error(err));
+  });
+
+  // Restore the last screen immediately so refresh never flashes Home first.
+  const bootRoute = parseAppRoute();
+  suppressRouteWrite = true;
+  setView(bootRoute.view);
+  suppressRouteWrite = false;
+  writeAppRoute(bootRoute.view, bootRoute.id);
+
   loadSession()
-    .then(() => {
-      setView("home");
-      return refresh();
+    .then(async () => {
+      await refresh();
+      await applyAppRoute();
     })
     .catch((err) => {
       console.error(err);
-      setView("home");
+      const { view } = parseAppRoute();
+      setView(VIEW_COPY[view] ? view : "home");
       toast("Could not load CRM data");
     });
 })();
