@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Brad — email signature · Vanderven Systems</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: "Segoe UI", Helvetica, Arial, sans-serif;
+        background: #f3f0ea;
+        color: #1c2430;
+        padding: 2rem 1.25rem 3rem;
+      }
+      .page {
+        max-width: 720px;
+        margin: 0 auto;
+      }
+      h1 {
+        margin: 0 0 0.35rem;
+        font-size: 1.45rem;
+      }
+      .how {
+        margin: 0 0 1.25rem;
+        font-size: 0.95rem;
+        line-height: 1.5;
+        color: #5c6570;
+      }
+      .how ol {
+        margin: 0.5rem 0 0;
+        padding-left: 1.2rem;
+      }
+      .card {
+        background: #fff;
+        border: 1px solid #ddd4c4;
+        border-radius: 14px;
+        padding: 1.25rem 1.35rem;
+        box-shadow: 0 10px 30px rgba(20, 24, 32, 0.06);
+      }
+      .hint {
+        margin: 1rem 0 0;
+        font-size: 0.85rem;
+        color: #5c6570;
+      }
+      button.copy {
+        margin-top: 1rem;
+        appearance: none;
+        border: 0;
+        border-radius: 10px;
+        padding: 0.7rem 1.1rem;
+        background: #b8953e;
+        color: #141820;
+        font: inherit;
+        font-weight: 650;
+        cursor: pointer;
+      }
+      button.copy:hover {
+        filter: brightness(1.05);
+      }
+      #status {
+        margin-left: 0.65rem;
+        font-size: 0.9rem;
+        color: #3d6b45;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <h1>Brad’s email signature</h1>
+      <p class="how">
+        For Google Workspace / Gmail:
+        <ol>
+          <li>Click <strong>Copy signature</strong> below (or select the block and copy).</li>
+          <li>Open Gmail → Settings → See all settings → <strong>Signature</strong>.</li>
+          <li>Paste into your signature field, then Save changes.</li>
+        </ol>
+      </p>
+
+      <div class="card">
+        <!-- SIGNATURE START: transparent header image (Gmail strips HTML overlap tricks) + HTML privacy -->
+        <div id="signature-block">
+          <table
+            cellpadding="0"
+            cellspacing="0"
+            border="0"
+            role="presentation"
+            style="border-collapse: collapse; background: transparent"
+          >
+            <tr>
+              <td style="padding: 0; font-size: 0; line-height: 0; background: transparent">
+                <a href="https://vanderven.ca" style="text-decoration: none; border: 0">
+                  <img
+                    src="https://vanderven.ca/public/signature-brad-header.png?v=15"
+                    width="480"
+                    height="143"
+                    alt="Brad Boudreau · Owner / Head AI Architect · Vanderven Systems · Mobile: 1-587-859-9115 · Brad@vanderven.ca · Vanderven.ca"
+                    style="
+                      display: block;
+                      border: 0;
+                      outline: none;
+                      width: 480px;
+                      max-width: 100%;
+                      height: auto;
+                      background: transparent;
+                    "
+                  />
+                </a>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding: 14px 0 0 0; background: transparent">
+                <p
+                  style="
+                    margin: 0;
+                    padding: 12px 0 0 0;
+                    border-top: 1px solid #d9d3c7;
+                    font-family: Arial, Helvetica, sans-serif;
+                    font-size: 9px;
+                    line-height: 13px;
+                    color: #7a7f86;
+                    background: transparent;
+                    mso-line-height-rule: exactly;
+                  "
+                >
+                  This electronic communication and any attachment is intended as a private communication for the sole
+                  use of the primary addressee and those individuals listed for copies in the original message. The
+                  information contained in this electronic message is private and confidential and if you are not an
+                  intended recipient you are hereby notified that copying, forwarding, storing or other dissemination or
+                  distribution of this communication by any means is prohibited. If you are not specifically authorized
+                  to receive this message and if you believe that you received it in error, please notify the original
+                  sender immediately. We honor similar requests relating to the privacy of electronic communications.
+                </p>
+              </td>
+            </tr>
+          </table>
+        </div>
+        <!-- SIGNATURE END -->
+
+        <div>
+          <button type="button" class="copy" id="copy-btn">Copy signature</button>
+          <span id="status" hidden>Copied — paste into Gmail signature settings</span>
+        </div>
+        <p class="hint">
+          Tip: Header is one transparent image (no white box) so Gmail can’t reopen the logo/text gap.
+          Privacy line below is still real HTML. Send yourself a test after pasting.
+        </p>
+      </div>
+    </div>
+
+    <script>
+      document.getElementById("copy-btn").addEventListener("click", async () => {
+        const block = document.getElementById("signature-block");
+        const status = document.getElementById("status");
+        try {
+          const html = block.innerHTML;
+          const text = block.innerText;
+          if (navigator.clipboard && window.ClipboardItem) {
+            await navigator.clipboard.write([
+              new ClipboardItem({
+                "text/html": new Blob([html], { type: "text/html" }),
+                "text/plain": new Blob([text], { type: "text/plain" }),
+              }),
+            ]);
+          } else {
+            const range = document.createRange();
+            range.selectNodeContents(block);
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+            document.execCommand("copy");
+            sel.removeAllRanges();
+          }
+          status.hidden = false;
+          setTimeout(() => {
+            status.hidden = true;
+          }, 4000);
+        } catch (err) {
+          alert("Could not copy automatically — select the signature above and press Ctrl+C.");
+        }
+      });
+    </script>
+  </body>
+</html>

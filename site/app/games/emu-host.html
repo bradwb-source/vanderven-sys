@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Game Host</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        background: #000;
+        color: #d7dde8;
+        font-family: Outfit, system-ui, sans-serif;
+        overflow: hidden;
+      }
+      #wrap {
+        width: 100%;
+        height: 100%;
+        display: grid;
+        place-items: center;
+      }
+      #game {
+        width: 100%;
+        height: 100%;
+      }
+      #status {
+        text-align: center;
+        padding: 1.5rem;
+        max-width: 28rem;
+        line-height: 1.45;
+      }
+      #status code {
+        color: #f0c56d;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="wrap">
+      <div id="status">Waiting for ROM…</div>
+      <div id="game" hidden></div>
+    </div>
+    <script>
+      (() => {
+        const status = document.getElementById("status");
+        const game = document.getElementById("game");
+        let objectUrl = "";
+        let booted = false;
+
+        function setStatus(html) {
+          status.hidden = false;
+          game.hidden = true;
+          status.innerHTML = html;
+        }
+
+        function boot({ name, core, buffer }) {
+          if (booted) location.reload();
+          booted = true;
+          try {
+            if (objectUrl) URL.revokeObjectURL(objectUrl);
+            const bytes = buffer instanceof ArrayBuffer ? buffer : buffer.buffer;
+            objectUrl = URL.createObjectURL(new Blob([bytes], { type: "application/octet-stream" }));
+            status.hidden = true;
+            game.hidden = false;
+
+            window.EJS_player = "#game";
+            window.EJS_core = core === "gba" ? "gba" : "gb";
+            window.EJS_gameUrl = objectUrl;
+            window.EJS_gameName = name || (core === "gba" ? "game.gba" : "game.gb");
+            window.EJS_gameID = core === "gba" ? 1002 : 1001;
+            window.EJS_color = "#1f7a6c";
+            window.EJS_volume = 0.55;
+            window.EJS_threads = false;
+            // Do NOT auto-start — user must click EmulatorJS "Start Game"
+            // so audio unlocks and the Nintendo logo can finish.
+            window.EJS_startOnLoaded = false;
+            window.EJS_fixedSaveInterval = 10000;
+            window.EJS_Buttons = {
+              loadSaveFiles: true,
+              saveSavFiles: true,
+              quickSave: true,
+              quickLoad: true,
+              fullscreen: true,
+              playPause: true,
+              volume: true,
+              restart: true,
+            };
+            window.EJS_defaultOptions = {
+              "save-state-location": "browser",
+            };
+            window.EJS_pathtodata = "https://cdn.emulatorjs.org/stable/data/";
+
+            const s = document.createElement("script");
+            s.src = "https://cdn.emulatorjs.org/stable/data/loader.js?v=" + Date.now();
+            s.onerror = () => setStatus("Could not load emulator scripts. Check your network, then try again.");
+            document.body.appendChild(s);
+
+            parent.postMessage({ type: "vanderven-emu", event: "booted", core: window.EJS_core }, "*");
+          } catch (err) {
+            setStatus("Failed to start: " + (err && err.message ? err.message : String(err)));
+            parent.postMessage({ type: "vanderven-emu", event: "error", message: String(err) }, "*");
+          }
+        }
+
+        window.addEventListener("message", (event) => {
+          const data = event.data;
+          if (!data || data.type !== "vanderven-emu") return;
+          if (data.cmd === "boot") boot(data);
+          if (data.cmd === "reset") {
+            try {
+              window.EJS_emulator?.restart?.();
+              window.EJS_emulator?.play?.();
+            } catch (_) {}
+          }
+        });
+
+        parent.postMessage({ type: "vanderven-emu", event: "ready" }, "*");
+        setStatus(
+          'ROM ready in parent.<br/>Click <strong>Play</strong> there, then press <strong>Start Game</strong> inside this player.<br/><code>GB / GBC / GBA</code> supported.'
+        );
+      })();
+    </script>
+  </body>
+</html>

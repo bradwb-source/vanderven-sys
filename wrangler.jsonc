@@ -1,12 +1,67 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "vanderven-sys",
+  "main": "src/worker.js",
   "compatibility_date": "2026-07-21",
+  "workers_dev": true,
+  "preview_urls": true,
   "observability": {
     "enabled": true
   },
   "assets": {
-    "directory": ".",
-    "not_found_handling": "404-page"
+    "directory": "site",
+    "binding": "ASSETS",
+    "not_found_handling": "404-page",
+    "run_worker_first": [
+      "/api/*",
+      "/login",
+      "/login.html",
+      "/app",
+      "/app/*",
+      "/sign",
+      "/sign/*",
+      "/pay",
+      "/pay/*"
+    ]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "vanderven-crm",
+      "database_id": "640615aa-4bf3-4db3-a56c-d6653370cc64",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "CALL_AUDIO",
+      "bucket_name": "vanderven-call-recordings"
+    }
+  ],
+  "ai": {
+    "binding": "AI",
+    "remote": true
+  },
+  "triggers": {
+    // Daily quote reminder sweep (UTC).
+    "crons": ["0 15 * * *"]
+  },
+  // Public hostnames for this Worker (marketing site + CRM/sign/pay).
+  "routes": [
+    {
+      "pattern": "vanderven.ca",
+      "custom_domain": true
+    },
+    {
+      "pattern": "www.vanderven.ca",
+      "custom_domain": true
+    },
+    {
+      "pattern": "app.vanderven.ca",
+      "custom_domain": true
+    }
+  ],
+  "vars": {
+    "PUBLIC_APP_ORIGIN": "https://app.vanderven.ca"
   }
 }

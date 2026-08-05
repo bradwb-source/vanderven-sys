@@ -1,0 +1,9 @@
+{
+  "name": "Vanderven Systems",
+  "short_name": "Vanderven",
+  "description": "Websites, AI automation, and marketing for Okanagan businesses.",
+  "start_url": "/",
+  "display": "browser",
+  "background_color": "#141820",
+  "theme_color": "#141820"
+}

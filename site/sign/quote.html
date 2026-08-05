@@ -1,0 +1,882 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Review &amp; sign quote — Vanderven Systems</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Outfit:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="icon" href="/public/favicon.ico" />
+    <style>
+      :root {
+        --ink: #141820;
+        --cream: #f4f1ea;
+        --gold: #b8953e;
+        --muted: rgba(28, 36, 48, 0.62);
+        --line: rgba(28, 36, 48, 0.12);
+        --font-display: "Cormorant Garamond", "Times New Roman", serif;
+        --font-body: "Outfit", "Segoe UI", sans-serif;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: var(--font-body);
+        color: var(--ink);
+        background:
+          radial-gradient(1200px 600px at 10% -10%, rgba(184, 149, 62, 0.18), transparent 55%),
+          linear-gradient(180deg, #f7f2e8 0%, #efe8db 100%);
+      }
+      .wrap {
+        max-width: 720px;
+        margin: 0 auto;
+        padding: 2rem 1.15rem 3rem;
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        margin-bottom: 1.25rem;
+      }
+      .brand img {
+        width: 56px;
+        height: auto;
+        max-height: 40px;
+        object-fit: contain;
+        display: block;
+      }
+      .brand span {
+        font-family: var(--font-display);
+        font-size: 1.55rem;
+        font-weight: 600;
+      }
+      .card {
+        background: #fffaf3;
+        border: 1px solid #ddd4c4;
+        border-radius: 16px;
+        overflow: hidden;
+        box-shadow: 0 18px 50px rgba(20, 24, 32, 0.08);
+      }
+      .hero {
+        padding: 1.6rem 1.5rem 1.35rem;
+        background: linear-gradient(135deg, #1c2430 0%, #2d3a4a 55%, #3d3424 100%);
+        color: #f7f1e6;
+      }
+      .hero .eyebrow {
+        font-size: 0.72rem;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        opacity: 0.75;
+      }
+      .hero h1 {
+        margin: 0.35rem 0 0;
+        font-family: var(--font-display);
+        font-size: clamp(1.8rem, 4vw, 2.35rem);
+        line-height: 1.15;
+        font-weight: 600;
+      }
+      .hero .meta {
+        margin: 0.85rem 0 0;
+        font-size: 0.92rem;
+        line-height: 1.5;
+        opacity: 0.9;
+      }
+      .body { padding: 1.5rem; }
+      .amount {
+        margin: 0;
+        padding: 1rem 1.1rem;
+        border-radius: 12px;
+        background: #f7f2e8;
+      }
+      .amount .label {
+        font-size: 0.72rem;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: #8a7340;
+        font-weight: 700;
+      }
+      .pricing-rows {
+        margin: 0.65rem 0 0.35rem;
+        display: grid;
+        gap: 0.3rem;
+      }
+      .pricing-rows .row {
+        display: flex;
+        justify-content: space-between;
+        gap: 1rem;
+        font-size: 0.9rem;
+        color: #3a424c;
+      }
+      .pricing-rows .row.is-list span:last-child {
+        text-decoration: line-through;
+        color: #8a9199;
+      }
+      .pricing-rows .row.is-discount span:last-child {
+        color: #6b5a2e;
+        font-weight: 650;
+      }
+      .amount strong {
+        display: inline;
+        margin-top: 0.25rem;
+        font-size: 1.65rem;
+      }
+      .amount.has-breakdown strong {
+        display: inline-block;
+        margin-top: 0.35rem;
+        padding-top: 0.45rem;
+        border-top: 1px solid #e0d6c4;
+      }
+      .discount-note {
+        margin: 0.65rem 0 0;
+        font-size: 0.85rem;
+        line-height: 1.45;
+        color: var(--muted);
+        white-space: pre-wrap;
+      }
+      .notes {
+        margin: 1.15rem 0 0;
+        font-size: 0.98rem;
+        line-height: 1.6;
+        color: #3a424c;
+        white-space: pre-wrap;
+      }
+      .quote-lines {
+        margin-top: 1.15rem;
+        overflow: auto;
+      }
+      .quote-lines table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.9rem;
+      }
+      .quote-lines th {
+        text-align: left;
+        font-size: 0.7rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--muted);
+        padding: 0.45rem 0.35rem;
+        border-bottom: 1px solid var(--line);
+      }
+      .quote-lines td {
+        padding: 0.55rem 0.35rem;
+        border-bottom: 1px solid #ece6da;
+        vertical-align: top;
+      }
+      .quote-lines .num { text-align: right; white-space: nowrap; }
+      .quote-extra {
+        margin-top: 1.15rem;
+        padding: 0.85rem 0.95rem;
+        border-radius: 12px;
+        background: #f7f2e8;
+      }
+      .quote-extra .label {
+        font-size: 0.7rem;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: #8a7340;
+        font-weight: 700;
+      }
+      .quote-extra .notes { margin-top: 0.45rem; font-size: 0.92rem; }
+      .sign-block {
+        margin-top: 1.5rem;
+        padding-top: 1.35rem;
+        border-top: 1px solid var(--line);
+      }
+      .sign-block h2 {
+        margin: 0 0 0.35rem;
+        font-family: var(--font-display);
+        font-size: 1.55rem;
+        font-weight: 600;
+      }
+      .sign-block .help {
+        margin: 0 0 1rem;
+        color: var(--muted);
+        font-size: 0.92rem;
+      }
+      label.field {
+        display: grid;
+        gap: 0.35rem;
+        margin-bottom: 0.9rem;
+        font-size: 0.88rem;
+        font-weight: 600;
+      }
+      label.field input[type="text"] {
+        width: 100%;
+        padding: 0.75rem 0.85rem;
+        border: 1px solid #d5cdbd;
+        border-radius: 10px;
+        font: inherit;
+        background: #fff;
+      }
+      .pad-wrap {
+        border: 1px solid #d5cdbd;
+        border-radius: 12px;
+        background: #fff;
+        overflow: hidden;
+      }
+      .pad-toolbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0.55rem 0.75rem;
+        border-bottom: 1px solid #ece6da;
+        font-size: 0.82rem;
+        color: var(--muted);
+      }
+      #sig-pad {
+        display: block;
+        width: 100%;
+        height: 180px;
+        touch-action: none;
+        cursor: crosshair;
+      }
+      .check {
+        display: flex;
+        gap: 0.65rem;
+        align-items: flex-start;
+        margin: 1rem 0 1.15rem;
+        font-size: 0.92rem;
+        line-height: 1.45;
+      }
+      .check input { margin-top: 0.2rem; }
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.65rem;
+      }
+      .btn {
+        appearance: none;
+        border: 0;
+        border-radius: 10px;
+        padding: 0.8rem 1.15rem;
+        font: inherit;
+        font-weight: 650;
+        cursor: pointer;
+      }
+      .btn:disabled { opacity: 0.55; cursor: not-allowed; }
+      .btn-primary { background: var(--gold); color: var(--ink); }
+      .btn-ghost {
+        background: transparent;
+        color: var(--ink);
+        border: 1px solid #d5cdbd;
+      }
+      .status {
+        padding: 1.5rem;
+        text-align: center;
+      }
+      .status h2 {
+        margin: 0 0 0.5rem;
+        font-family: var(--font-display);
+        font-size: 1.8rem;
+      }
+      .status p { margin: 0; color: var(--muted); line-height: 1.55; }
+      .sig-preview {
+        margin: 1rem auto 0;
+        max-width: 320px;
+        background: #fff;
+        border: 1px solid #ddd4c4;
+        border-radius: 10px;
+        padding: 0.5rem;
+      }
+      .sig-preview img { display: block; width: 100%; height: auto; }
+      .error {
+        margin: 0 0 0.85rem;
+        padding: 0.7rem 0.85rem;
+        border-radius: 10px;
+        background: #fde8e4;
+        color: #7a2e22;
+        font-size: 0.9rem;
+      }
+      .muted { color: var(--muted); }
+      .pay-block {
+        margin-top: 1.35rem;
+        padding-top: 1.25rem;
+        border-top: 1px solid var(--line);
+      }
+      .pay-block h2 {
+        margin: 0 0 0.35rem;
+        font-family: var(--font-display);
+        font-size: 1.55rem;
+        font-weight: 600;
+      }
+      .pay-block .help {
+        margin: 0 0 0.9rem;
+        color: var(--muted);
+        font-size: 0.92rem;
+      }
+      .pay-options {
+        display: grid;
+        gap: 0.75rem;
+      }
+      @media (min-width: 560px) {
+        .pay-options { grid-template-columns: 1fr 1fr; }
+      }
+      .pay-option {
+        padding: 1rem 1.05rem;
+        border-radius: 12px;
+        background: #f7f2e8;
+        border: 1px solid #e0d6c4;
+      }
+      .pay-option h3 {
+        margin: 0;
+        font-size: 1rem;
+        font-weight: 700;
+      }
+      .pay-option .amount {
+        margin: 0.55rem 0 0;
+        padding: 0;
+        background: transparent;
+        font-size: 1.35rem;
+        font-weight: 700;
+      }
+      .pay-option .detail {
+        margin: 0.45rem 0 0;
+        font-size: 0.88rem;
+        line-height: 1.45;
+        color: var(--muted);
+      }
+      .pay-option .btn {
+        display: block;
+        width: 100%;
+        box-sizing: border-box;
+        margin-top: 0.85rem;
+        text-align: center;
+        text-decoration: none;
+      }
+      [hidden] { display: none !important; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="brand">
+        <img src="/public/logo-mark-nav-transparent.png" alt="Vanderven Systems" width="56" height="33" />
+        <span>Vanderven Systems</span>
+      </div>
+
+      <div id="state-loading" class="card status">
+        <h2>Loading quote…</h2>
+        <p>One moment.</p>
+      </div>
+
+      <div id="state-error" class="card status" hidden>
+        <h2>Link unavailable</h2>
+        <p id="error-detail">This signing link is invalid or expired.</p>
+      </div>
+
+      <div id="state-done" class="card" hidden>
+        <div class="status">
+          <h2 id="done-title">Thank you</h2>
+          <p id="done-detail"></p>
+          <div class="sig-preview" id="done-sig" hidden>
+            <img id="done-sig-img" alt="Signature on file" />
+          </div>
+          <p id="paid-banner" class="help" hidden style="margin-top:1rem;color:#2f6b4f;font-weight:600;"></p>
+          <p id="cancel-banner" class="help" hidden style="margin-top:1rem;color:#7a5a22;"></p>
+        </div>
+        <div class="body" id="done-pay-wrap" hidden style="border-top:1px solid var(--line);padding-top:1.25rem;">
+          <div class="pay-block" style="margin-top:0;padding-top:0;border-top:0;">
+            <h2 id="done-pay-heading">Deposit due to begin</h2>
+            <p class="help" id="done-pay-help">
+              Kickoff deposit only — balance is invoiced later. e-Transfer has no fee; card includes 3.5% processing.
+            </p>
+            <div class="pay-options" id="done-pay-options">
+              <div class="pay-option">
+                <h3>Pay via e-Transfer</h3>
+                <p class="amount" id="done-pay-etransfer-amount"></p>
+                <p class="detail">
+                  No extra fee.<br />
+                  Send Interac to <strong id="done-pay-accounting"></strong><br />
+                  Memo: <strong id="done-pay-memo"></strong>
+                </p>
+              </div>
+              <div class="pay-option">
+                <h3>Pay by card</h3>
+                <p class="amount" id="done-pay-card-amount"></p>
+                <p class="detail" id="done-pay-card-detail"></p>
+                <button type="button" class="btn btn-primary" id="done-pay-card-btn">Pay by card</button>
+                <p class="error" id="done-pay-error" hidden></p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="state-form" class="card" hidden>
+        <div class="hero">
+          <div class="eyebrow">Quote <span id="q-number"></span></div>
+          <h1 id="q-title"></h1>
+          <p class="meta">
+            Prepared for <strong id="q-client"></strong><br />
+            <span id="q-company-tag"></span>
+          </p>
+        </div>
+        <div class="body">
+          <div class="amount" id="q-pricing">
+            <div class="label">Investment total</div>
+            <div id="q-pricing-rows" class="pricing-rows" hidden></div>
+            <p class="discount-note" id="q-discount-note" hidden></p>
+            <strong id="q-amount"></strong> <span class="muted" style="font-size: 0.95rem">CAD</span>
+          </div>
+          <p class="notes" id="q-notes"></p>
+          <div id="q-lines" class="quote-lines" hidden></div>
+          <div id="q-terms-wrap" class="quote-extra" hidden>
+            <div class="label">Terms &amp; conditions</div>
+            <p id="q-terms" class="notes"></p>
+          </div>
+          <div id="q-addendums-wrap" class="quote-extra" hidden>
+            <div class="label">Addendums</div>
+            <p id="q-addendums" class="notes"></p>
+          </div>
+
+          <div class="sign-block" style="margin-top:1.35rem;padding-top:1.25rem;border-top:1px solid var(--line);">
+            <h2>Approve &amp; sign</h2>
+            <p class="help">Sign to approve first — then you’ll pay the kickoff deposit.</p>
+            <p class="error" id="form-error" hidden></p>
+
+            <label class="field">
+              <span>Full name</span>
+              <input id="signed-name" type="text" autocomplete="name" maxlength="120" required placeholder="Your full legal name" />
+            </label>
+
+            <div class="pad-wrap">
+              <div class="pad-toolbar">
+                <span>Draw signature</span>
+                <button type="button" class="btn btn-ghost" id="clear-sig" style="padding: 0.35rem 0.7rem; font-size: 0.82rem">
+                  Clear
+                </button>
+              </div>
+              <canvas id="sig-pad" width="680" height="180" aria-label="Signature pad"></canvas>
+            </div>
+
+            <label class="check">
+              <input type="checkbox" id="agree" />
+              <span>I agree to and approve this quote on behalf of the client named above.</span>
+            </label>
+
+            <div class="actions">
+              <button type="button" class="btn btn-primary" id="btn-approve">Approve &amp; sign</button>
+              <button type="button" class="btn btn-ghost" id="btn-decline">Decline</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      (function () {
+        const token = (location.pathname.match(/\/sign\/q\/([^/]+)\/?$/) || [])[1] || new URLSearchParams(location.search).get("token") || "";
+        const params = new URLSearchParams(location.search);
+        let currentQuote = null;
+        const els = {
+          loading: document.getElementById("state-loading"),
+          error: document.getElementById("state-error"),
+          errorDetail: document.getElementById("error-detail"),
+          done: document.getElementById("state-done"),
+          doneTitle: document.getElementById("done-title"),
+          doneDetail: document.getElementById("done-detail"),
+          doneSig: document.getElementById("done-sig"),
+          doneSigImg: document.getElementById("done-sig-img"),
+          paidBanner: document.getElementById("paid-banner"),
+          cancelBanner: document.getElementById("cancel-banner"),
+          donePayWrap: document.getElementById("done-pay-wrap"),
+          donePayHeading: document.getElementById("done-pay-heading"),
+          donePayHelp: document.getElementById("done-pay-help"),
+          donePayOptions: document.getElementById("done-pay-options"),
+          donePayEtransfer: document.getElementById("done-pay-etransfer-amount"),
+          donePayAccounting: document.getElementById("done-pay-accounting"),
+          donePayMemo: document.getElementById("done-pay-memo"),
+          donePayCardAmount: document.getElementById("done-pay-card-amount"),
+          donePayCardDetail: document.getElementById("done-pay-card-detail"),
+          donePayCardBtn: document.getElementById("done-pay-card-btn"),
+          donePayError: document.getElementById("done-pay-error"),
+          form: document.getElementById("state-form"),
+          formError: document.getElementById("form-error"),
+          number: document.getElementById("q-number"),
+          title: document.getElementById("q-title"),
+          client: document.getElementById("q-client"),
+          companyTag: document.getElementById("q-company-tag"),
+          amount: document.getElementById("q-amount"),
+          pricingRows: document.getElementById("q-pricing-rows"),
+          discountNote: document.getElementById("q-discount-note"),
+          notes: document.getElementById("q-notes"),
+          lines: document.getElementById("q-lines"),
+          termsWrap: document.getElementById("q-terms-wrap"),
+          terms: document.getElementById("q-terms"),
+          addendumsWrap: document.getElementById("q-addendums-wrap"),
+          addendums: document.getElementById("q-addendums"),
+          name: document.getElementById("signed-name"),
+          agree: document.getElementById("agree"),
+          clear: document.getElementById("clear-sig"),
+          approve: document.getElementById("btn-approve"),
+          decline: document.getElementById("btn-decline"),
+          canvas: document.getElementById("sig-pad"),
+        };
+
+        function money(cents) {
+          return ((Number(cents) || 0) / 100).toLocaleString("en-CA", {
+            style: "currency",
+            currency: "CAD",
+          });
+        }
+
+        function payTokenFromUrl(payUrl) {
+          const m = String(payUrl || "").match(/\/pay\/q\/([^/?#]+)/);
+          return m ? decodeURIComponent(m[1]) : "";
+        }
+
+        function show(which) {
+          els.loading.hidden = which !== "loading";
+          els.error.hidden = which !== "error";
+          els.done.hidden = which !== "done";
+          els.form.hidden = which !== "form";
+        }
+
+        function renderDonePay(quote) {
+          const depositDue =
+            Number(quote.depositDueCents) || Math.round((Number(quote.amountCents) || 0) * 0.5);
+          const approved = quote.status === "approved";
+          const confirmedPaid = Boolean(quote.alreadyPaid);
+          const pendingPaid = !confirmedPaid && params.get("paid") === "1";
+          if (!approved || depositDue <= 0) {
+            els.donePayWrap.hidden = true;
+            els.paidBanner.hidden = true;
+            return;
+          }
+          if (confirmedPaid) {
+            els.donePayWrap.hidden = true;
+            els.paidBanner.hidden = false;
+            els.paidBanner.textContent =
+              "Deposit already received — thank you. We’ll invoice the balance later.";
+            return;
+          }
+          if (pendingPaid) {
+            // Stripe returned success; wait for webhook before claiming the deposit is on file.
+            els.donePayWrap.hidden = true;
+            els.paidBanner.hidden = false;
+            els.paidBanner.textContent = "Confirming your payment… this usually takes a few seconds.";
+            return;
+          }
+          els.donePayWrap.hidden = false;
+          els.donePayOptions.hidden = false;
+          if (els.donePayHeading) els.donePayHeading.textContent = "Deposit due to begin";
+          els.donePayHelp.textContent =
+            "Kickoff deposit only — balance is invoiced later. e-Transfer has no fee; card includes 3.5% processing.";
+          const fee = Number(quote.cardFeeCents) || Math.round(depositDue * 0.035);
+          const cardTotal = Number(quote.cardTotalCents) || depositDue + fee;
+          els.donePayEtransfer.textContent = money(depositDue);
+          els.donePayAccounting.textContent =
+            quote.accountingEmail || quote.company?.accountingEmail || "accounting@vanderven.ca";
+          els.donePayMemo.textContent = quote.number || "your quote number";
+          els.donePayCardAmount.textContent = money(cardTotal);
+          els.donePayCardDetail.textContent = `${money(depositDue)} deposit + 3.5% processing (${money(fee)})`;
+          els.donePayCardBtn.hidden = !payTokenFromUrl(quote.payUrl);
+        }
+
+        async function confirmPaidIfNeeded(quote) {
+          if (!quote || quote.status !== "approved") return quote;
+          if (quote.alreadyPaid || params.get("paid") !== "1") return quote;
+          for (let i = 0; i < 8; i += 1) {
+            await new Promise((r) => setTimeout(r, 1500));
+            try {
+              const res = await fetch(`/api/public/quotes/sign-preview?token=${encodeURIComponent(token)}`);
+              const data = await res.json().catch(() => ({}));
+              if (res.ok && data.quote?.alreadyPaid) {
+                currentQuote = data.quote;
+                showDone(data.quote);
+                return data.quote;
+              }
+            } catch {
+              /* keep polling */
+            }
+          }
+          els.paidBanner.hidden = false;
+          els.paidBanner.textContent =
+            "Payment submitted. If you don’t see confirmation shortly, contact Vanderven — don’t pay again.";
+          return quote;
+        }
+
+        function showDone(quote) {
+          currentQuote = quote;
+          const approved = quote.status === "approved";
+          els.doneTitle.textContent = approved ? "Quote approved" : "Quote declined";
+          els.doneDetail.textContent = approved
+            ? `Thanks${quote.signedName ? `, ${quote.signedName}` : ""}. ${quote.number} is signed and on file with Vanderven Systems.`
+            : `${quote.number} was marked declined. You can reply to your Vanderven contact if you’d like to revisit.`;
+          if (approved && quote.signaturePng) {
+            els.doneSig.hidden = false;
+            els.doneSigImg.src = quote.signaturePng;
+          } else {
+            els.doneSig.hidden = true;
+          }
+          if (params.get("cancelled") === "1" && approved && !quote.alreadyPaid) {
+            els.cancelBanner.hidden = false;
+            els.cancelBanner.textContent = "Checkout was cancelled. You can try again below or pay by e-Transfer.";
+          } else {
+            els.cancelBanner.hidden = true;
+          }
+          renderDonePay(quote);
+          show("done");
+        }
+
+        function fillQuote(quote) {
+          els.number.textContent = quote.number || "";
+          els.title.textContent = quote.title || "Quote";
+          els.client.textContent = quote.clientName || "Client";
+          els.companyTag.textContent = quote.company?.tagline || "";
+          const subtotalCents = Number(quote.subtotalCents) || Number(quote.amountCents) || 0;
+          const discountCents = Math.max(
+            0,
+            Math.min(subtotalCents, Number(quote.discountCents) || 0)
+          );
+          els.amount.textContent = quote.amountLabel || money(quote.amountCents);
+          const pricingEl = document.getElementById("q-pricing");
+          if (discountCents > 0) {
+            els.pricingRows.hidden = false;
+            els.pricingRows.innerHTML = `
+              <div class="row is-list"><span>What this costs</span><span>${escapeHtml(
+                money(subtotalCents)
+              )}</span></div>
+              <div class="row is-discount"><span>${escapeHtml(
+                quote.discountLabel || "Discount"
+              )}</span><span>−${escapeHtml(money(discountCents))}</span></div>`;
+          } else {
+            els.pricingRows.hidden = true;
+            els.pricingRows.innerHTML = "";
+          }
+          if (quote.discountNote) {
+            els.discountNote.hidden = false;
+            els.discountNote.textContent = quote.discountNote;
+          } else {
+            els.discountNote.hidden = true;
+            els.discountNote.textContent = "";
+          }
+          pricingEl?.classList.toggle(
+            "has-breakdown",
+            discountCents > 0 || Boolean(quote.discountNote)
+          );
+          els.notes.textContent = quote.notes || "Scope and deliverables as discussed.";
+          const items = Array.isArray(quote.lineItems) ? quote.lineItems : [];
+          if (items.length) {
+            els.lines.hidden = false;
+            els.lines.innerHTML = `<table>
+              <thead><tr><th>Item</th><th class="num">Qty</th><th class="num">Rate</th><th class="num">Amount</th></tr></thead>
+              <tbody>${items
+                .map((item) => {
+                  const total = Math.round(Number(item.qty) * Number(item.unitCents || 0));
+                  return `<tr>
+                    <td>${escapeHtml(item.description || "")}</td>
+                    <td class="num">${escapeHtml(String(item.qty ?? 1))}</td>
+                    <td class="num">${escapeHtml(money(item.unitCents))}</td>
+                    <td class="num">${escapeHtml(money(total))}</td>
+                  </tr>`;
+                })
+                .join("")}</tbody></table>`;
+          } else {
+            els.lines.hidden = true;
+            els.lines.innerHTML = "";
+          }
+          if (quote.terms) {
+            els.termsWrap.hidden = false;
+            els.terms.textContent = quote.terms;
+          } else {
+            els.termsWrap.hidden = true;
+            els.terms.textContent = "";
+          }
+          if (quote.addendums) {
+            els.addendumsWrap.hidden = false;
+            els.addendums.textContent = quote.addendums;
+          } else {
+            els.addendumsWrap.hidden = true;
+            els.addendums.textContent = "";
+          }
+        }
+
+        function escapeHtml(value) {
+          return String(value ?? "")
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;");
+        }
+
+        const ctx = els.canvas.getContext("2d");
+        let drawing = false;
+        let stroked = false;
+        const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+
+        function resizeCanvas() {
+          const rect = els.canvas.getBoundingClientRect();
+          els.canvas.width = Math.floor(rect.width * dpr);
+          els.canvas.height = Math.floor(180 * dpr);
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          ctx.lineWidth = 2.2;
+          ctx.lineCap = "round";
+          ctx.lineJoin = "round";
+          ctx.strokeStyle = "#1c2430";
+        }
+
+        function pos(event) {
+          const rect = els.canvas.getBoundingClientRect();
+          const src = event.touches ? event.touches[0] : event;
+          return { x: src.clientX - rect.left, y: src.clientY - rect.top };
+        }
+
+        function start(event) {
+          event.preventDefault();
+          drawing = true;
+          const p = pos(event);
+          ctx.beginPath();
+          ctx.moveTo(p.x, p.y);
+        }
+        function move(event) {
+          if (!drawing) return;
+          event.preventDefault();
+          const p = pos(event);
+          ctx.lineTo(p.x, p.y);
+          ctx.stroke();
+          stroked = true;
+        }
+        function end() {
+          drawing = false;
+        }
+
+        function clearPad() {
+          ctx.clearRect(0, 0, els.canvas.width, els.canvas.height);
+          stroked = false;
+        }
+
+        els.canvas.addEventListener("mousedown", start);
+        els.canvas.addEventListener("mousemove", move);
+        window.addEventListener("mouseup", end);
+        els.canvas.addEventListener("touchstart", start, { passive: false });
+        els.canvas.addEventListener("touchmove", move, { passive: false });
+        els.canvas.addEventListener("touchend", end);
+        els.clear.addEventListener("click", clearPad);
+        window.addEventListener("resize", () => {
+          const had = stroked;
+          const prev = had ? els.canvas.toDataURL("image/png") : "";
+          resizeCanvas();
+          if (prev) {
+            const img = new Image();
+            img.onload = () => {
+              ctx.drawImage(img, 0, 0, els.canvas.width / dpr, 180);
+              stroked = true;
+            };
+            img.src = prev;
+          }
+        });
+
+        async function submit(action) {
+          els.formError.hidden = true;
+          els.approve.disabled = true;
+          els.decline.disabled = true;
+          try {
+            if (action === "approve") {
+              const signedName = String(els.name.value || "").trim();
+              if (signedName.length < 2) throw new Error("Type your full name to sign.");
+              if (!stroked) throw new Error("Draw your signature before approving.");
+              if (!els.agree.checked) throw new Error("Confirm you agree to and approve this quote.");
+              const signaturePng = els.canvas.toDataURL("image/png");
+              const res = await fetch("/api/public/quotes/sign", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ token, action: "approve", signedName, signaturePng }),
+              });
+              const data = await res.json();
+              if (!res.ok) throw new Error(data.error || "Could not sign quote.");
+              showDone(data.quote);
+              return;
+            }
+            if (!confirm("Decline this quote?")) return;
+            const res = await fetch("/api/public/quotes/sign", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ token, action: "decline" }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || "Could not decline quote.");
+            showDone(data.quote);
+          } catch (err) {
+            els.formError.textContent = err.message || "Something went wrong.";
+            els.formError.hidden = false;
+          } finally {
+            els.approve.disabled = false;
+            els.decline.disabled = false;
+          }
+        }
+
+        els.approve.addEventListener("click", () => submit("approve"));
+        els.decline.addEventListener("click", () => submit("decline"));
+        els.donePayCardBtn?.addEventListener("click", async () => {
+          const payToken = payTokenFromUrl(currentQuote?.payUrl);
+          if (!payToken) return;
+          els.donePayError.hidden = true;
+          els.donePayCardBtn.disabled = true;
+          try {
+            const res = await fetch("/api/public/pay/checkout", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ kind: "quote", token: payToken }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+              if (data.signUrl && data.needsSignature) {
+                location.href = data.signUrl;
+                return;
+              }
+              throw new Error(data.error || "Could not start checkout");
+            }
+            location.href = data.url;
+          } catch (err) {
+            els.donePayError.textContent = err.message || "Checkout failed";
+            els.donePayError.hidden = false;
+            els.donePayCardBtn.disabled = false;
+          }
+        });
+
+        async function boot() {
+          if (!token) {
+            els.errorDetail.textContent = "This signing link is missing a token.";
+            show("error");
+            return;
+          }
+          try {
+            const res = await fetch(`/api/public/quotes/sign-preview?token=${encodeURIComponent(token)}`);
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || "Link unavailable");
+            const quote = data.quote;
+            if (quote.status === "approved" || quote.status === "declined") {
+              showDone(quote);
+              if (quote.status === "approved") await confirmPaidIfNeeded(quote);
+              return;
+            }
+            if (quote.status !== "sent" && quote.status !== "revisions_requested") {
+              els.errorDetail.textContent = "This quote is not open for signature.";
+              show("error");
+              return;
+            }
+            // Returning from checkout before signing — keep them on the sign form.
+            if (params.get("paid") === "1") {
+              els.formError.hidden = false;
+              els.formError.textContent =
+                "Please sign and approve this quote first. After you sign, you can pay the deposit.";
+            }
+            fillQuote(quote);
+            show("form");
+            resizeCanvas();
+          } catch (err) {
+            els.errorDetail.textContent = err.message || "This signing link is invalid or expired.";
+            show("error");
+          }
+        }
+
+        boot();
+      })();
+    </script>
+  </body>
+</html>

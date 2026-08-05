@@ -1,0 +1,3 @@
+# Exclude anything that is not part of the public site.
+.DS_Store
+public/photos/_fresh
