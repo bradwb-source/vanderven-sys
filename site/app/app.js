@@ -68,8 +68,8 @@
     reminders: { title: "Reminders", sub: "Automated quote follow-ups for you and the client." },
     settings: { title: "Settings", sub: "Password, outbound email, users, quote attachments, and reminders." },
     pdf: {
-      title: "PDF editor",
-      sub: "Open, annotate, sign, and download — local only, nothing saved on the server.",
+      title: "PDF",
+      sub: "Open a PDF and mark it up — nothing is stored in the CRM.",
     },
     games: { title: "Games", sub: "Arcade breakers when you need a minute." },
   };
@@ -82,6 +82,8 @@
     jobs: [],
     quotes: [],
     quoteDocuments: [],
+    quoteFiles: [],
+    quoteFilesBusy: false,
     invoices: [],
     reminders: [],
     reminderSettings: null,
@@ -114,8 +116,7 @@
     veraDetail: null,
     gamesActiveId: null,
     gamesHandle: null,
-    pdfEditorApi: null,
-    pdfEditorHandle: null,
+    pdfMounted: false,
   };
 
   const SLOT_START_HOUR = 8;
@@ -191,10 +192,19 @@
     quoteClientTypeahead: document.getElementById("quote-client-typeahead"),
     quoteScheduleBuild: document.getElementById("quote-schedule-build"),
     quoteAttachments: document.getElementById("quote-attachments"),
+    quoteFileDrop: document.getElementById("quote-file-drop"),
+    quoteFileInput: document.getElementById("quote-file-input"),
+    quoteFileList: document.getElementById("quote-file-list"),
     quoteSignaturePanel: document.getElementById("quote-signature-panel"),
     quotePreview: document.getElementById("quote-preview"),
+    quoteLines: document.getElementById("quote-lines"),
+    quoteAddLine: document.getElementById("quote-add-line"),
+    quoteSubtotalDisplay: document.getElementById("quote-subtotal-display"),
+    quoteTotalDisplay: document.getElementById("quote-total-display"),
     printQuote: document.getElementById("print-quote"),
+    previewQuoteClient: document.getElementById("preview-quote-client"),
     sendQuote: document.getElementById("send-quote"),
+    copyQuotePayLink: document.getElementById("copy-quote-pay-link"),
     invoiceDrawerClose: document.getElementById("invoice-drawer-close"),
     invoiceDrawerTitle: document.getElementById("invoice-drawer-title"),
     invoiceDrawerMeta: document.getElementById("invoice-drawer-meta"),
@@ -203,6 +213,7 @@
     invoiceAddLine: document.getElementById("invoice-add-line"),
     printInvoice: document.getElementById("print-invoice"),
     sendInvoice: document.getElementById("send-invoice"),
+    copyInvoicePayLink: document.getElementById("copy-invoice-pay-link"),
     invoiceLeadPicker: document.getElementById("invoice-lead-picker"),
     invoiceQuotePicker: document.getElementById("invoice-quote-picker"),
     invoiceJobPicker: document.getElementById("invoice-job-picker"),
@@ -220,11 +231,35 @@
   const COMPANY = {
     name: "Vanderven Systems",
     email: "hello@vanderven.ca",
+    accountingEmail: "accounting@vanderven.ca",
     location: "Kelowna & Central Okanagan, BC",
     web: "vanderven.ca",
     tagline: "Websites, automation & systems for local businesses",
     logo: "/public/logo-mark-nav.png",
+    logoOnDark: "/public/logo-mark-nav-transparent.png",
   };
+
+  const CARD_FEE_RATE = 0.035;
+  const cardFeeCents = (base) => Math.round(Math.max(0, Number(base) || 0) * CARD_FEE_RATE);
+  const cardTotalCents = (base) => Math.max(0, Number(base) || 0) + cardFeeCents(base);
+
+  const QUOTE_DEPOSIT_RATE = 0.5;
+  const defaultQuoteDepositCents = (amountCents) =>
+    Math.max(0, Math.round((Number(amountCents) || 0) * QUOTE_DEPOSIT_RATE));
+
+  const DEFAULT_QUOTE_TERMS = [
+    "Payment: 50% deposit to begin (see How to pay); balance on delivery of approved scope.",
+    "Timeline: dates are estimates and depend on timely client feedback and asset delivery.",
+    "Scope changes: work outside this quote is billed separately or via a revised quote.",
+    "Ownership: final deliverables transfer on full payment.",
+    "This quote is valid for 30 days from the issue date.",
+  ].join("\n");
+
+  const DEFAULT_QUOTE_LINES = () => [
+    emptyQuoteLine({ description: "Discovery & strategy", qty: 1, unitCents: 0 }),
+    emptyQuoteLine({ description: "Design & build", qty: 1, unitCents: 0 }),
+    emptyQuoteLine({ description: "Launch, training & handoff", qty: 1, unitCents: 0 }),
+  ];
 
   const viewEls = {
     home: els.home,
@@ -1248,6 +1283,110 @@
     return "";
   }
 
+  let suppressRouteWrite = false;
+  const ROUTE_STORAGE_KEY = "vs_crm_route";
+
+  function cleanRouteId(value) {
+    return String(value || "")
+      .trim()
+      .slice(0, 80);
+  }
+
+  function readStoredRoute() {
+    try {
+      const raw = sessionStorage.getItem(ROUTE_STORAGE_KEY);
+      if (!raw) return null;
+      const data = JSON.parse(raw);
+      const view = String(data?.view || "").toLowerCase();
+      if (!VIEW_COPY[view]) return null;
+      return { view, id: cleanRouteId(data?.id) };
+    } catch {
+      return null;
+    }
+  }
+
+  function storeRoute(view, id = "") {
+    try {
+      sessionStorage.setItem(
+        ROUTE_STORAGE_KEY,
+        JSON.stringify({ view: VIEW_COPY[view] ? view : "home", id: cleanRouteId(id) })
+      );
+    } catch {
+      /* ignore quota / private mode */
+    }
+  }
+
+  function parseAppRoute() {
+    const raw = String(location.hash || "").replace(/^#/, "").trim();
+    if (raw) {
+      const qIdx = raw.indexOf("?");
+      const viewPart = (qIdx >= 0 ? raw.slice(0, qIdx) : raw).trim().toLowerCase();
+      const query = qIdx >= 0 ? raw.slice(qIdx + 1) : "";
+      const params = new URLSearchParams(query);
+      const view = VIEW_COPY[viewPart] ? viewPart : "home";
+      return { view, id: cleanRouteId(params.get("id")) };
+    }
+    return readStoredRoute() || { view: "home", id: "" };
+  }
+
+  function writeAppRoute(view = state.view, id = "") {
+    if (suppressRouteWrite) return;
+    const nextView = VIEW_COPY[view] ? view : "home";
+    const nextId = cleanRouteId(id);
+    storeRoute(nextView, nextId);
+    let next = `#${nextView}`;
+    if (nextId) next += `?id=${encodeURIComponent(nextId)}`;
+    if (location.hash === next) return;
+    const url = `${location.pathname}${location.search}${next}`;
+    try {
+      history.replaceState(null, "", url);
+    } catch {
+      location.hash = next;
+    }
+  }
+
+  function routeIdForOpenDrawers() {
+    if (els.clientDrawer?.classList.contains("is-open")) {
+      return state.clientDetail?.lead?.id || els.form?.id?.value || "";
+    }
+    if (els.jobDrawer?.classList.contains("is-open")) return els.jobForm?.id?.value || "";
+    if (els.quoteDrawer?.classList.contains("is-open")) return els.quoteForm?.id?.value || "";
+    if (els.invoiceDrawer?.classList.contains("is-open")) return els.invoiceForm?.id?.value || "";
+    return "";
+  }
+
+  async function applyAppRoute({ allowOpen = true } = {}) {
+    const { view, id } = parseAppRoute();
+    suppressRouteWrite = true;
+    try {
+      if (state.view !== view) setView(view);
+      else writeAppRoute(view, allowOpen ? id : "");
+      if (!allowOpen || !id) return;
+      if (view === "clients" || view === "requests" || view === "pipeline") {
+        await openLead(id);
+        return;
+      }
+      if (view === "jobs" || view === "schedule" || view === "home") {
+        openJob(id);
+        return;
+      }
+      if (view === "quotes") {
+        await openQuote(id);
+        return;
+      }
+      if (view === "invoices") {
+        openInvoice(id);
+        return;
+      }
+      if (view === "vera") {
+        await openVeraChat(id);
+      }
+    } finally {
+      suppressRouteWrite = false;
+      writeAppRoute(state.view, routeIdForOpenDrawers());
+    }
+  }
+
   function applyViewHeader(view = state.view) {
     const copy = VIEW_COPY[view];
     if (!copy || !els.title || !els.sub) return;
@@ -1279,11 +1418,26 @@
     state.gamesHandle = null;
   }
 
+  function destroyPdfEditor() {
+    if (window.PdfEditor && typeof window.PdfEditor.destroy === "function") {
+      try {
+        window.PdfEditor.destroy();
+      } catch {
+        /* ignore teardown errors */
+      }
+    }
+    state.pdfMounted = false;
+    if (els.pdf) els.pdf.innerHTML = "";
+  }
+
   function setView(view) {
     if (!VIEW_COPY[view]) return;
     if (state.view === "games" && view !== "games") {
       stopActiveGame();
       state.gamesActiveId = null;
+    }
+    if (state.view === "pdf" && view !== "pdf") {
+      destroyPdfEditor();
     }
     state.view = view;
     if (view !== "vera") state.veraDetail = null;
@@ -1309,10 +1463,14 @@
 
     applyViewHeader(view);
     els.search.placeholder = view === "vera" ? "Search Vera chats" : "Search everything";
-    const hideSearch = view === "games" || view === "pdf";
-    els.search.hidden = hideSearch;
-    if (els.searchMenu) els.searchMenu.hidden = hideSearch;
+    const hideChrome = view === "games" || view === "pdf";
+    els.search.hidden = hideChrome;
+    if (els.searchMenu) els.searchMenu.hidden = hideChrome;
+    const createMenu = els.quickCreate?.closest(".create-menu");
+    if (createMenu) createMenu.hidden = view === "pdf";
+    if (view === "pdf") closeCreateMenu();
 
+    writeAppRoute(view, "");
     renderFilters();
     render();
     if (view === "vera") {
@@ -2267,7 +2425,16 @@
     if (quote.hasSignature && quote.signedName) {
       sentLine = `Signed by ${quote.signedName}${quote.signedAt ? ` · ${formatDate(quote.signedAt)}` : ""}`;
     } else if (quote.awaitingSignature) {
-      sentLine = "Awaiting signature";
+      sentLine = quote.clientViewedAt
+        ? `Viewed ${formatDate(quote.clientViewedAt)} · awaiting signature`
+        : "Awaiting signature";
+    }
+    const paidCents = Number(quote.depositPaidCents) || 0;
+    if (paidCents > 0) {
+      const when = quote.depositPaidAt
+        ? formatDateTime(quote.depositPaidAt) || formatDate(quote.depositPaidAt)
+        : "";
+      sentLine = `Deposit ${formatMoneyExact(paidCents)} received${when ? ` · ${when}` : ""}`;
     }
     return `
       <article class="doc-card tone-${meta.tone}" data-open-quote="${escapeHtml(quote.id)}">
@@ -2792,7 +2959,9 @@
     try {
       const data = await api(`/api/vera-chats/${encodeURIComponent(id)}`);
       state.veraDetail = data;
-      renderVera();
+      if (state.view !== "vera") setView("vera");
+      else renderVera();
+      writeAppRoute("vera", id);
     } catch (err) {
       toast(err.message || "Could not open chat");
     }
@@ -3138,7 +3307,7 @@
         <section class="settings-block" id="quote-docs-settings">
           <h2>Quote attachments</h2>
           <p class="muted">
-            Placeholder forms attached with every send (privacy, terms, intake, etc.).
+            Documents attached when you send a quote (privacy, terms, Client Services Agreement, etc.).
             Turn on <strong>Every quote</strong> for defaults on new quotes — you can still change the set on each quote.
           </p>
           <div class="quote-docs-list" id="quote-docs-list">
@@ -3150,7 +3319,14 @@
               <article class="quote-docs-row" data-doc-id="${escapeHtml(doc.id)}">
                 <div class="quote-docs-row__main">
                   <strong>${escapeHtml(doc.title)}</strong>
-                  <span class="muted">${escapeHtml(doc.summary || doc.kind || "Placeholder")}</span>
+                  <span class="muted">${escapeHtml(doc.summary || doc.kind || "Placeholder")}${
+                        doc.fileName ? ` · ${escapeHtml(doc.fileName)}` : ""
+                      }</span>
+                  ${
+                    doc.filePath
+                      ? `<a class="muted" href="${escapeHtml(doc.filePath)}" target="_blank" rel="noopener noreferrer">Download file</a>`
+                      : ""
+                  }
                 </div>
                 <label class="checkbox-field">
                   <input type="checkbox" data-doc-every="${escapeHtml(doc.id)}" ${
@@ -3436,32 +3612,24 @@
       vera: renderVera,
       reminders: renderReminders,
       settings: renderSettings,
-      pdf: renderPdfEditor,
+      pdf: renderPdf,
       games: renderGames,
     };
     (map[state.view] || renderHome)();
   }
 
-  async function renderPdfEditor() {
+  function renderPdf() {
     if (!els.pdf) return;
-    if (els.pdf.dataset.pdfMounted === "1") return;
-    try {
-      if (!state.pdfEditorApi) {
-        state.pdfEditorApi = await import("/app/pdf-editor.js");
-      }
-      if (state.pdfEditorHandle && typeof state.pdfEditorHandle.destroy === "function") {
-        state.pdfEditorHandle.destroy();
-      }
-      state.pdfEditorHandle = state.pdfEditorApi.mountCrmPdfEditor(els.pdf);
-    } catch (err) {
-      console.error(err);
-      els.pdf.innerHTML = `
-        <div class="panel" style="padding:1.25rem">
-          <strong>Could not load the PDF editor.</strong>
-          <p class="muted">Check your connection and try again.</p>
-        </div>`;
-      toast(err.message || "Could not load PDF editor");
+    if (!window.PdfEditor || typeof window.PdfEditor.mount !== "function") {
+      els.pdf.innerHTML = `<div class="pdf-editor pdf-editor--empty"><p>PDF editor failed to load.</p></div>`;
+      state.pdfMounted = false;
+      return;
     }
+    if (state.pdfMounted && els.pdf.querySelector(".pdf-editor")) return;
+    window.PdfEditor.mount(els.pdf, {
+      toast: (msg) => toast(msg),
+    });
+    state.pdfMounted = true;
   }
 
   const GAMES_CATALOG = [
@@ -3689,6 +3857,7 @@
     setTimeout(() => {
       if (allDrawers().every((d) => !d.classList.contains("is-open"))) els.backdrop.hidden = true;
     }, 200);
+    writeAppRoute(state.view, "");
   }
 
   function openOnly(drawer, { create = false, deleteBtn } = {}) {
@@ -4340,6 +4509,75 @@
       </div>
       <p class="client-actions__hint">Pipeline: client → quote (optional) → build → invoice. Skip any middle step you don’t need.</p>
 
+      <section class="client-panel client-deposits">
+        <div class="client-panel__head">
+          <h3>Deposits</h3>
+          <span class="pipeline-col__count">${(detail.deposits || []).length}</span>
+        </div>
+        <p class="muted" style="margin:0 0 0.65rem;font-size:0.85rem">
+          Available credit: <strong>${escapeHtml(formatMoneyExact(detail.depositAvailableCents || 0))}</strong>
+          · card payments land here · editable · applied on final invoices
+        </p>
+        <form id="client-deposit-form" class="client-deposit-form">
+          <div class="field-row">
+            <label class="field">
+              <span>Amount (CAD)</span>
+              <input name="amount" type="number" min="0.01" step="0.01" required placeholder="0.00" />
+            </label>
+            <label class="field">
+              <span>Method</span>
+              <select name="method">
+                <option value="etransfer">E-transfer</option>
+                <option value="manual">Manual</option>
+                <option value="card">Card</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Status</span>
+              <select name="status">
+                <option value="received">Received</option>
+                <option value="pending">Pending</option>
+                <option value="applied">Applied</option>
+                <option value="void">Void</option>
+              </select>
+            </label>
+          </div>
+          <label class="field">
+            <span>Note</span>
+            <input name="note" type="text" placeholder="Optional — e.g. Interac received for Q-4827" />
+          </label>
+          <div class="settings-actions">
+            <button type="submit" class="btn btn-soft">Add deposit</button>
+          </div>
+        </form>
+        <div class="client-deposit-list">
+          ${
+            (detail.deposits || []).length
+              ? (detail.deposits || [])
+                  .map(
+                    (dep) => `
+            <div class="client-deposit-row" data-deposit-id="${escapeHtml(dep.id)}">
+              <div class="client-deposit-row__meta">
+                <strong>${escapeHtml(formatMoneyExact(dep.amountCents))}</strong>
+                <span class="muted">${escapeHtml(dep.method)} · ${escapeHtml(dep.status)}${
+                      dep.feeCents
+                        ? ` · fee ${escapeHtml(formatMoneyExact(dep.feeCents))}`
+                        : ""
+                    }</span>
+                ${dep.note ? `<span class="muted">${escapeHtml(dep.note)}</span>` : ""}
+              </div>
+              <div class="client-deposit-row__actions">
+                <button type="button" class="btn btn-ghost" data-edit-deposit>Edit</button>
+                <button type="button" class="btn btn-ghost" data-void-deposit>Void</button>
+              </div>
+            </div>`
+                  )
+                  .join("")
+              : `<div class="drop-hint"><span>No deposits yet</span></div>`
+          }
+        </div>
+      </section>
+
       <div class="client-columns">
         <section class="client-panel">
           <div class="client-panel__head">
@@ -4499,6 +4737,81 @@
       }
     });
 
+    els.clientDetailBody.querySelector("#client-deposit-form")?.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const data = new FormData(form);
+      const btn = form.querySelector('button[type="submit"]');
+      btn.disabled = true;
+      try {
+        const res = await api(`/api/leads/${encodeURIComponent(leadId)}/deposits`, {
+          method: "POST",
+          body: JSON.stringify({
+            amount: data.get("amount"),
+            method: data.get("method"),
+            status: data.get("status"),
+            note: data.get("note"),
+          }),
+        });
+        state.clientDetail = res.detail;
+        renderClientDetailBody(res.detail);
+        toast("Deposit recorded");
+      } catch (err) {
+        toast(err.message || "Could not add deposit");
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    els.clientDetailBody.querySelectorAll("[data-edit-deposit]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const row = btn.closest("[data-deposit-id]");
+        const id = row?.dataset?.depositId;
+        const dep = (state.clientDetail?.deposits || []).find((d) => d.id === id);
+        if (!dep) return;
+        const amount = prompt("Deposit amount (CAD)", dollarsFromCents(dep.amountCents));
+        if (amount === null) return;
+        const note = prompt("Note", dep.note || "");
+        if (note === null) return;
+        const status = prompt("Status (pending|received|applied|void)", dep.status);
+        if (status === null) return;
+        try {
+          const res = await api(`/api/deposits/${encodeURIComponent(id)}`, {
+            method: "PATCH",
+            body: JSON.stringify({ amount, note, status }),
+          });
+          if (res.detail) {
+            state.clientDetail = res.detail;
+            renderClientDetailBody(res.detail);
+          }
+          toast("Deposit updated");
+        } catch (err) {
+          toast(err.message || "Could not update deposit");
+        }
+      });
+    });
+
+    els.clientDetailBody.querySelectorAll("[data-void-deposit]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const row = btn.closest("[data-deposit-id]");
+        const id = row?.dataset?.depositId;
+        if (!id || !confirm("Void this deposit?")) return;
+        try {
+          const res = await api(`/api/deposits/${encodeURIComponent(id)}`, {
+            method: "PATCH",
+            body: JSON.stringify({ status: "void" }),
+          });
+          if (res.detail) {
+            state.clientDetail = res.detail;
+            renderClientDetailBody(res.detail);
+          }
+          toast("Deposit voided");
+        } catch (err) {
+          toast(err.message || "Could not void deposit");
+        }
+      });
+    });
+
     els.clientDetailBody.querySelectorAll("[data-client-action]").forEach((btn) => {
       btn.addEventListener("click", async () => {
         const action = btn.dataset.clientAction;
@@ -4564,6 +4877,7 @@
     els.clientDrawerMeta.textContent = `${stageLabel(lead.stage)} · Loading history…`;
     els.clientDetailBody.innerHTML = `<p class="muted">Loading client history…</p>`;
     openOnly(els.clientDrawer);
+    writeAppRoute(state.view === "requests" ? "requests" : state.view === "pipeline" ? "pipeline" : "clients", id);
     try {
       const detail = await api(`/api/leads/${encodeURIComponent(id)}/detail`);
       state.clientDetail = detail;
@@ -4795,6 +5109,20 @@
     return q.split(/\s+/).every((part) => hay.includes(part));
   }
 
+  let quoteLeadSearchTimer = 0;
+  let quoteLeadSearchSeq = 0;
+
+  function mergeLeadsIntoState(leads) {
+    if (!Array.isArray(leads) || !leads.length) return;
+    const byId = new Map((state.leads || []).map((lead) => [lead.id, lead]));
+    for (const lead of leads) {
+      if (lead?.id) byId.set(lead.id, lead);
+    }
+    state.leads = [...byId.values()].sort((a, b) =>
+      String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""))
+    );
+  }
+
   function fillQuoteLeadPicker(selectedId = "") {
     if (!els.quoteLeadSearch) return;
     const lead = selectedId ? state.leads.find((l) => l.id === selectedId) : null;
@@ -4823,29 +5151,20 @@
       refreshQuotePreview();
       return;
     }
-    if (!els.quoteForm.clientName.value) {
-      els.quoteForm.clientName.value = lead.business || lead.name || "";
-    }
+    els.quoteForm.clientName.value = lead.business || lead.name || "";
     if (!els.quoteForm.title.value) {
       els.quoteForm.title.value = `${lead.business || lead.name} — services`;
     }
     refreshQuotePreview();
   }
 
-  function renderQuoteLeadResults(query = "") {
+  function paintQuoteLeadResults(matches, query = "") {
     if (!els.quoteLeadResults || !els.quoteLeadSearch) return;
     const q = String(query || "").trim();
-    const matches = (state.leads || [])
-      .filter((lead) => leadMatchesQuery(lead, q))
-      .slice(0, 12);
-    if (!q) {
-      closeQuoteLeadResults();
-      return;
-    }
     if (!matches.length) {
-      els.quoteLeadResults.innerHTML = `<div class="client-typeahead__empty">No clients match “${escapeHtml(
-        q
-      )}”</div>`;
+      els.quoteLeadResults.innerHTML = q
+        ? `<div class="client-typeahead__empty">No clients match “${escapeHtml(q)}”</div>`
+        : `<div class="client-typeahead__empty">No clients yet — add one under Clients first.</div>`;
       els.quoteLeadResults.hidden = false;
       els.quoteLeadSearch.setAttribute("aria-expanded", "true");
       return;
@@ -4868,9 +5187,62 @@
     });
   }
 
+  async function fetchQuoteLeadMatches(query = "") {
+    const q = String(query || "").trim();
+    const seq = ++quoteLeadSearchSeq;
+    try {
+      const path = q ? `/api/leads?q=${encodeURIComponent(q)}` : "/api/leads";
+      const data = await api(path);
+      if (seq !== quoteLeadSearchSeq) return null;
+      const leads = data.leads || [];
+      mergeLeadsIntoState(leads);
+      const matches = (q ? leads.filter((lead) => leadMatchesQuery(lead, q)) : leads).slice(0, 12);
+      return matches;
+    } catch {
+      if (seq !== quoteLeadSearchSeq) return null;
+      const matches = (state.leads || [])
+        .filter((lead) => leadMatchesQuery(lead, q))
+        .slice(0, 12);
+      return matches;
+    }
+  }
+
+  function renderQuoteLeadResults(query = "", { immediate = false } = {}) {
+    if (!els.quoteLeadResults || !els.quoteLeadSearch) return;
+    const q = String(query || "").trim();
+    const run = async () => {
+      els.quoteLeadResults.innerHTML = `<div class="client-typeahead__empty">Loading clients…</div>`;
+      els.quoteLeadResults.hidden = false;
+      els.quoteLeadSearch.setAttribute("aria-expanded", "true");
+      const matches = await fetchQuoteLeadMatches(q);
+      if (matches == null) return;
+      paintQuoteLeadResults(matches, q);
+    };
+    window.clearTimeout(quoteLeadSearchTimer);
+    if (immediate) run();
+    else quoteLeadSearchTimer = window.setTimeout(run, 160);
+  }
+
   function setQuoteScheduleBuildVisible(show) {
     if (!els.quoteScheduleBuild) return;
     els.quoteScheduleBuild.hidden = !show;
+  }
+
+  function quoteClientSignUrl(quote) {
+    const token = String(quote?.signToken || "").trim().slice(0, 80);
+    if (!token) return "";
+    return `${location.origin}/sign/q/${encodeURIComponent(token)}`;
+  }
+
+  function syncQuoteClientPreviewButton(quote) {
+    const btn = els.previewQuoteClient;
+    if (!btn) return;
+    const url = quoteClientSignUrl(quote);
+    const canPreview =
+      Boolean(url) &&
+      ["sent", "revisions_requested", "approved", "declined"].includes(String(quote?.status || ""));
+    btn.hidden = !canPreview;
+    btn.dataset.previewUrl = canPreview ? url : "";
   }
 
   function scheduleBuildFromQuote(quoteId) {
@@ -4919,6 +5291,10 @@
     els.jobForm.status.value = job.status || "unscheduled";
     els.jobForm.notes.value = job.notes || "";
     openOnly(els.jobDrawer, { create: false, deleteBtn: els.deleteJob });
+    writeAppRoute(
+      state.view === "schedule" || state.view === "home" || state.view === "jobs" ? state.view : "jobs",
+      id
+    );
     loadJobContext(job);
   }
 
@@ -5003,7 +5379,14 @@
         } />
         <span class="quote-attach-row__body">
           <strong>${escapeHtml(doc.title)}</strong>
-          <span class="muted">${escapeHtml(doc.summary || "Placeholder form")}</span>
+          <span class="muted">${escapeHtml(doc.summary || "Placeholder form")}${
+            doc.fileName ? ` · ${escapeHtml(doc.fileName)}` : ""
+          }</span>
+          ${
+            doc.filePath
+              ? `<a class="muted" href="${escapeHtml(doc.filePath)}" target="_blank" rel="noopener noreferrer" data-stop-attach>Download</a>`
+              : ""
+          }
         </span>
         ${
           doc.attachToEveryQuote
@@ -5013,9 +5396,297 @@
       </label>`
       )
       .join("");
+    els.quoteAttachments.querySelectorAll("[data-stop-attach]").forEach((link) => {
+      link.addEventListener("click", (event) => event.stopPropagation());
+    });
     els.quoteAttachments.querySelectorAll('input[name="documentId"]').forEach((input) => {
       input.addEventListener("change", refreshQuotePreview);
     });
+  }
+
+  function formatByteSize(bytes) {
+    const n = Number(bytes) || 0;
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+    return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  function setQuoteFiles(files) {
+    state.quoteFiles = Array.isArray(files) ? files : [];
+    renderQuoteFileList();
+    refreshQuotePreview();
+  }
+
+  function renderQuoteFileList() {
+    if (!els.quoteFileList) return;
+    const files = state.quoteFiles || [];
+    if (!files.length) {
+      els.quoteFileList.innerHTML = "";
+      return;
+    }
+    els.quoteFileList.innerHTML = files
+      .map(
+        (file) => `
+      <div class="quote-file-row" data-file-id="${escapeHtml(file.id)}">
+        <div class="quote-file-row__meta">
+          <strong>${escapeHtml(file.fileName || "Attachment")}</strong>
+          <span class="muted">${escapeHtml(formatByteSize(file.byteSize))} · extra file</span>
+        </div>
+        <div class="quote-file-row__actions">
+          <a class="btn btn-ghost" href="${escapeHtml(file.url || "#")}" target="_blank" rel="noopener noreferrer">Open</a>
+          <button type="button" class="btn btn-ghost" data-remove-quote-file>Remove</button>
+        </div>
+      </div>`
+      )
+      .join("");
+    els.quoteFileList.querySelectorAll("[data-remove-quote-file]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const row = btn.closest("[data-file-id]");
+        const fileId = row?.dataset?.fileId;
+        const quoteId = els.quoteForm?.id?.value;
+        if (!fileId || !quoteId) return;
+        btn.disabled = true;
+        try {
+          await api(`/api/quotes/${encodeURIComponent(quoteId)}/files/${encodeURIComponent(fileId)}`, {
+            method: "DELETE",
+          });
+          setQuoteFiles((state.quoteFiles || []).filter((f) => f.id !== fileId));
+          const quote = state.quotes.find((q) => q.id === quoteId);
+          if (quote) quote.files = state.quoteFiles;
+          toast("Attachment removed");
+        } catch (err) {
+          toast(err.message || "Could not remove file");
+          btn.disabled = false;
+        }
+      });
+    });
+  }
+
+  async function ensureQuoteSavedForFiles() {
+    if (els.quoteForm?.id?.value) return els.quoteForm.id.value;
+    toast("Saving quote so files can attach…");
+    const quote = await saveQuoteRecord({ keepOpen: true });
+    return quote?.id || "";
+  }
+
+  async function uploadQuoteFiles(fileList) {
+    const files = [...(fileList || [])].filter(Boolean);
+    if (!files.length) return;
+    if (state.quoteFilesBusy) return;
+    state.quoteFilesBusy = true;
+    els.quoteFileDrop?.classList.add("is-busy");
+    try {
+      const quoteId = await ensureQuoteSavedForFiles();
+      if (!quoteId) throw new Error("Save the quote before attaching files");
+      for (const file of files) {
+        const body = new FormData();
+        body.append("file", file, file.name);
+        const res = await fetch(`/api/quotes/${encodeURIComponent(quoteId)}/files`, {
+          credentials: "same-origin",
+          method: "POST",
+          body,
+        });
+        if (res.status === 401) {
+          location.href = "/login?next=/app/&reason=idle";
+          throw new Error("Unauthorized");
+        }
+        markActivity();
+        scheduleIdleWatch();
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `Could not upload ${file.name}`);
+        state.quoteFiles = [...(state.quoteFiles || []), data.file];
+      }
+      renderQuoteFileList();
+      refreshQuotePreview();
+      const quote = state.quotes.find((q) => q.id === quoteId);
+      if (quote) quote.files = state.quoteFiles;
+      toast(files.length === 1 ? "File attached" : `${files.length} files attached`);
+    } catch (err) {
+      toast(err.message || "Upload failed");
+    } finally {
+      state.quoteFilesBusy = false;
+      els.quoteFileDrop?.classList.remove("is-busy");
+      if (els.quoteFileInput) els.quoteFileInput.value = "";
+    }
+  }
+
+  function bindQuoteFileDrop() {
+    const zone = els.quoteFileDrop;
+    const input = els.quoteFileInput;
+    if (!zone || zone.dataset.bound === "1") return;
+    zone.dataset.bound = "1";
+    zone.addEventListener("click", () => input?.click());
+    zone.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        input?.click();
+      }
+    });
+    input?.addEventListener("change", () => uploadQuoteFiles(input.files));
+    zone.addEventListener("dragenter", (event) => {
+      event.preventDefault();
+      zone.classList.add("is-dragover");
+    });
+    zone.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      zone.classList.add("is-dragover");
+    });
+    zone.addEventListener("dragleave", (event) => {
+      if (event.target === zone) zone.classList.remove("is-dragover");
+    });
+    zone.addEventListener("drop", (event) => {
+      event.preventDefault();
+      zone.classList.remove("is-dragover");
+      uploadQuoteFiles(event.dataTransfer?.files);
+    });
+  }
+
+  function emptyQuoteLine(overrides = {}) {
+    return {
+      id: `qline_${Math.random().toString(36).slice(2, 8)}`,
+      description: "",
+      qty: 1,
+      unitCents: 0,
+      ...overrides,
+    };
+  }
+
+  function readQuoteLinesFromDom() {
+    if (!els.quoteLines) return [];
+    return [...els.quoteLines.querySelectorAll(".invoice-line")]
+      .map((row, index) => {
+        const description = row.querySelector('[name="lineDesc"]')?.value || "";
+        const qty = parseFloat(row.querySelector('[name="lineQty"]')?.value || "1");
+        const unitCents = centsFromInput(row.querySelector('[name="lineAmount"]')?.value);
+        return {
+          id: row.dataset.lineId || `qline_${index + 1}`,
+          description: description.trim(),
+          qty: Number.isFinite(qty) && qty > 0 ? qty : 1,
+          unitCents,
+        };
+      })
+      .filter((line) => line.description);
+  }
+
+  function quoteLinesTotalCents(lines) {
+    return (lines || []).reduce(
+      (sum, line) => sum + Math.round(Number(line.qty) * Number(line.unitCents)),
+      0
+    );
+  }
+
+  function readQuoteDiscountCents() {
+    if (!els.quoteForm?.discount) return 0;
+    return Math.max(0, centsFromInput(els.quoteForm.discount.value));
+  }
+
+  function readQuoteDepositCents(amountCents) {
+    const amount = Math.max(0, Number(amountCents) || 0);
+    if (!els.quoteForm?.deposit) return defaultQuoteDepositCents(amount);
+    const raw = Math.max(0, centsFromInput(els.quoteForm.deposit.value));
+    return Math.max(0, Math.min(amount, raw));
+  }
+
+  function quoteDepositFieldIsManual() {
+    return els.quoteForm?.deposit?.dataset?.manual === "1";
+  }
+
+  function setQuoteDepositField(cents, { manual = false } = {}) {
+    if (!els.quoteForm?.deposit) return;
+    els.quoteForm.deposit.value = dollarsFromCents(Math.max(0, Number(cents) || 0));
+    els.quoteForm.deposit.dataset.manual = manual ? "1" : "0";
+  }
+
+  function quotePricingFrom(lines, discountCents = 0) {
+    const subtotalCents = quoteLinesTotalCents(lines);
+    const safeDiscount = Math.max(0, Math.min(subtotalCents, Number(discountCents) || 0));
+    return {
+      subtotalCents,
+      discountCents: safeDiscount,
+      amountCents: Math.max(0, subtotalCents - safeDiscount),
+    };
+  }
+
+  function updateQuoteTotalDisplay(lines) {
+    const pricing = quotePricingFrom(lines, readQuoteDiscountCents());
+    if (els.quoteSubtotalDisplay) {
+      els.quoteSubtotalDisplay.textContent = formatMoneyExact(pricing.subtotalCents);
+    }
+    if (els.quoteTotalDisplay) {
+      els.quoteTotalDisplay.textContent = formatMoneyExact(pricing.amountCents);
+    }
+    if (els.quoteForm?.deposit && !quoteDepositFieldIsManual()) {
+      setQuoteDepositField(defaultQuoteDepositCents(pricing.amountCents), { manual: false });
+    } else if (els.quoteForm?.deposit) {
+      const capped = readQuoteDepositCents(pricing.amountCents);
+      if (centsFromInput(els.quoteForm.deposit.value) !== capped) {
+        els.quoteForm.deposit.value = dollarsFromCents(capped);
+      }
+    }
+  }
+
+  function renderQuoteLines(lines) {
+    if (!els.quoteLines) return;
+    const list = lines?.length ? lines : DEFAULT_QUOTE_LINES();
+    els.quoteLines.innerHTML = list
+      .map(
+        (line) => `
+      <div class="invoice-line" data-line-id="${escapeHtml(line.id)}">
+        <label class="field invoice-line__desc">
+          <span>Description</span>
+          <input name="lineDesc" value="${escapeHtml(line.description || "")}" placeholder="Discovery workshop" />
+        </label>
+        <label class="field">
+          <span>Qty</span>
+          <input name="lineQty" type="number" min="0.25" step="0.25" value="${escapeHtml(String(line.qty || 1))}" />
+        </label>
+        <label class="field">
+          <span>Rate (CAD)</span>
+          <input name="lineAmount" type="number" min="0" step="0.01" value="${escapeHtml(
+            dollarsFromCents(line.unitCents)
+          )}" />
+        </label>
+        <button type="button" class="btn btn-ghost invoice-line__remove" aria-label="Remove line">×</button>
+      </div>`
+      )
+      .join("");
+    els.quoteLines.querySelectorAll(".invoice-line__remove").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const row = btn.closest(".invoice-line");
+        row?.remove();
+        if (!els.quoteLines.querySelector(".invoice-line")) {
+          renderQuoteLines([emptyQuoteLine()]);
+        }
+        refreshQuotePreview();
+      });
+    });
+    els.quoteLines.querySelectorAll("input").forEach((input) => {
+      input.addEventListener("input", refreshQuotePreview);
+    });
+    updateQuoteTotalDisplay(readQuoteLinesFromDom());
+    refreshQuotePreview();
+  }
+
+  /** Matches server QUOTE_NUMBER_START — preview only; server assigns on save. */
+  const QUOTE_NUMBER_START = 4827;
+
+  function suggestNextQuoteNumber() {
+    let max = QUOTE_NUMBER_START - 1;
+    for (const quote of state.quotes || []) {
+      const match = String(quote.number || "").match(/^Q-(\d+)$/i);
+      if (!match) continue;
+      const n = Number(match[1]);
+      if (Number.isFinite(n)) max = Math.max(max, n);
+    }
+    return `Q-${max + 1}`;
+  }
+
+  function depositMethodLabel(method) {
+    const m = String(method || "").toLowerCase();
+    if (m === "card") return "Card";
+    if (m === "etransfer") return "e-Transfer";
+    if (m === "manual") return "Manual";
+    return method || "Payment";
   }
 
   function collectQuoteDraft() {
@@ -5023,18 +5694,48 @@
     const form = new FormData(els.quoteForm);
     const documentIds = readSelectedDocumentIds();
     const documents = (state.quoteDocuments || []).filter((d) => documentIds.includes(d.id));
+    const lineItems = readQuoteLinesFromDom();
+    const discountCents = readQuoteDiscountCents();
+    const pricing = quotePricingFrom(lineItems, discountCents);
+    updateQuoteTotalDisplay(lineItems);
+    const depositDueCents = readQuoteDepositCents(pricing.amountCents);
+    const id = form.get("id") || "";
+    const existingNumber = String(form.get("number") || "").trim();
+    const saved = id ? (state.quotes || []).find((q) => q.id === id) : null;
     return {
-      id: form.get("id") || "",
-      number: String(form.get("number") || "").trim() || "Q-DRAFT",
+      id,
+      number: existingNumber || (id ? "Q-DRAFT" : suggestNextQuoteNumber()),
       title: String(form.get("title") || "").trim(),
       clientName: String(form.get("clientName") || "").trim(),
       status: form.get("status") || "draft",
-      amountCents: centsFromInput(form.get("amount")),
+      subtotalCents: pricing.subtotalCents,
+      discountCents: pricing.discountCents,
+      discountLabel: String(form.get("discountLabel") || "").trim(),
+      discountNote: String(form.get("discountNote") || "").trim(),
+      amountCents: pricing.amountCents,
+      depositCents: depositDueCents,
+      depositDueCents,
+      lineItems,
       notes: String(form.get("notes") || "").trim(),
+      terms: String(form.get("terms") || "").trim(),
+      addendums: String(form.get("addendums") || "").trim(),
       ownerEmail: String(form.get("ownerEmail") || "").trim(),
       leadId: form.get("leadId") || "",
       documentIds,
       documents,
+      files: state.quoteFiles || [],
+      // Completion state from saved quote (signature + deposit payments)
+      hasSignature: Boolean(saved?.hasSignature),
+      signedName: saved?.signedName || "",
+      signedAt: saved?.signedAt || "",
+      signaturePng: saved?.signaturePng || "",
+      alreadyPaid: Boolean(saved?.alreadyPaid),
+      depositPaidCents: Number(saved?.depositPaidCents) || 0,
+      depositFeeCents: Number(saved?.depositFeeCents) || 0,
+      depositPaidAt: saved?.depositPaidAt || "",
+      depositPaidLatestAt: saved?.depositPaidLatestAt || "",
+      depositPaidMethod: saved?.depositPaidMethod || "",
+      deposits: Array.isArray(saved?.deposits) ? saved.deposits : [],
     };
   }
 
@@ -5042,65 +5743,284 @@
     const draft = collectQuoteDraft();
     if (!draft) return null;
     return {
-      number: draft.number === "Q-DRAFT" ? "" : draft.number,
+      // New quotes always get a server-assigned number (ignore client guess).
+      number: draft.id ? draft.number : "",
       title: draft.title,
       clientName: draft.clientName,
       leadId: draft.leadId || null,
       status: draft.status,
       amount: dollarsFromCents(draft.amountCents),
+      deposit: dollarsFromCents(draft.depositDueCents),
+      discount: dollarsFromCents(draft.discountCents),
+      discountLabel: draft.discountLabel,
+      discountNote: draft.discountNote,
+      lineItems: draft.lineItems,
       ownerEmail: draft.ownerEmail,
       notes: draft.notes,
+      terms: draft.terms,
+      addendums: draft.addendums,
       documentIds: draft.documentIds,
     };
   }
 
   function renderQuoteDocumentHtml(quote, { forPrint = false } = {}) {
     const docs = quote.documents || [];
-    const attachList = docs
-      .map(
+    const customFiles = quote.files || [];
+    const attachList = [
+      ...docs.map(
         (doc) =>
           `<li><strong>${escapeHtml(doc.title)}</strong> — ${escapeHtml(doc.summary || doc.kind || "Placeholder")}</li>`
-      )
+      ),
+      ...customFiles.map(
+        (file) =>
+          `<li><strong>${escapeHtml(file.fileName || "Attachment")}</strong> — additional file · ${escapeHtml(
+            formatByteSize(file.byteSize)
+          )}</li>`
+      ),
+    ].join("");
+    const lineRows = (quote.lineItems || [])
+      .map((item) => {
+        const total = Math.round(Number(item.qty) * Number(item.unitCents));
+        return `<tr>
+          <td>${escapeHtml(item.description)}</td>
+          <td class="num">${escapeHtml(String(item.qty))}</td>
+          <td class="num">${escapeHtml(formatMoneyExact(item.unitCents))}</td>
+          <td class="num">${escapeHtml(formatMoneyExact(total))}</td>
+        </tr>`;
+      })
       .join("");
+    const subtotalCents =
+      Number(quote.subtotalCents) || quoteLinesTotalCents(quote.lineItems || []) || Number(quote.amountCents) || 0;
+    const discountCents = Math.max(
+      0,
+      Math.min(subtotalCents, Number(quote.discountCents) || 0)
+    );
+    const chargeCents = Math.max(0, subtotalCents - discountCents);
+    const depositDueCents = Math.max(
+      0,
+      Math.min(
+        chargeCents,
+        quote.depositDueCents != null
+          ? Number(quote.depositDueCents)
+          : quote.depositCents != null
+            ? Number(quote.depositCents)
+            : defaultQuoteDepositCents(chargeCents)
+      )
+    );
+    const discountLabel = quote.discountLabel || "Discount";
+    const lead =
+      (quote.leadId && (state.leads || []).find((l) => l.id === quote.leadId)) ||
+      (state.leads || []).find(
+        (l) =>
+          String(l.business || "").trim().toLowerCase() ===
+          String(quote.clientName || "").trim().toLowerCase()
+      ) ||
+      null;
+    const clientBiz = quote.clientName || lead?.business || lead?.name || "Client";
+    const clientContact =
+      lead?.name && String(lead.name).trim().toLowerCase() !== String(clientBiz).trim().toLowerCase()
+        ? lead.name
+        : "";
+    const clientLines = [clientBiz, clientContact, lead?.email, lead?.phone, formatClientAddress(lead)]
+      .map((p) => String(p || "").trim())
+      .filter(Boolean);
+    const totalsHtml = `
+      <div class="invoice-sheet__totals quote-sheet__pricing">
+        ${
+          discountCents
+            ? `<div class="quote-sheet__list-price"><span>What this costs</span><strong>${escapeHtml(
+                formatMoneyExact(subtotalCents)
+              )}</strong></div>
+               <div class="quote-sheet__discount"><span>${escapeHtml(discountLabel)}</span><strong>−${escapeHtml(
+                 formatMoneyExact(discountCents)
+               )}</strong></div>
+               ${
+                 quote.discountNote
+                   ? `<p class="quote-sheet__discount-note">${escapeHtml(quote.discountNote)}</p>`
+                   : ""
+               }`
+            : ""
+        }
+        <div class="is-total"><span>Investment total</span><strong>${escapeHtml(
+          formatMoneyExact(chargeCents)
+        )} <span class="muted">CAD</span></strong></div>
+      </div>`;
+    const logoSrc = COMPANY.logoOnDark || COMPANY.logo;
     return `
       <article class="invoice-sheet quote-sheet${forPrint ? " is-print" : ""}">
         <header class="invoice-sheet__brand">
-          <div class="invoice-sheet__brand-left">
-            <img src="${escapeHtml(COMPANY.logo)}" alt="" width="120" height="72" />
-            <div>
-              <strong>Vanderven</strong><span>Systems</span>
-              <p>${escapeHtml(COMPANY.tagline)}</p>
+          <div class="invoice-sheet__brand-left quote-sheet__brand-left">
+            <div class="quote-sheet__brand-row">
+              <img class="quote-sheet__logo" src="${escapeHtml(logoSrc)}" alt="" width="72" height="72" />
+              <div class="quote-sheet__name">
+                <strong>Vanderven</strong><span>Systems</span>
+              </div>
             </div>
+            <p class="quote-sheet__tagline">${escapeHtml(COMPANY.tagline)}</p>
           </div>
           <div class="invoice-sheet__brand-right">
-            <span class="invoice-sheet__kicker">Quote</span>
-            <h2>${escapeHtml(quote.number || "Q-DRAFT")}</h2>
-            <p>Prepared for ${escapeHtml(quote.clientName || "Client")}<br/>${escapeHtml(
-              formatMoneyExact(quote.amountCents)
-            )}</p>
+            <span class="invoice-sheet__kicker">${
+              quote.status === "approved"
+                ? "Approved quote"
+                : quote.status === "declined"
+                  ? "Declined quote"
+                  : "Quote"
+            }</span>
+            <h2>${escapeHtml(quote.number || suggestNextQuoteNumber())}</h2>
+            <p>Prepared for ${escapeHtml(clientBiz)}<br/>${escapeHtml(formatMoneyExact(chargeCents))}</p>
           </div>
         </header>
         <div class="invoice-sheet__meta">
           <div>
             <span class="invoice-sheet__label">Proposal</span>
             <p><strong>${escapeHtml(quote.title || "Untitled quote")}</strong></p>
-            <p class="muted">${escapeHtml(quote.notes || "Scope and deliverables as discussed.")}</p>
+            <p class="muted quote-sheet__pre">${escapeHtml(quote.notes || "Scope and deliverables as discussed.")}</p>
           </div>
           <div class="invoice-sheet__meta-right">
-            <span class="invoice-sheet__label">Investment</span>
-            <p><strong>${escapeHtml(formatMoneyExact(quote.amountCents))}</strong></p>
-            <p class="muted">CAD · subject to final scope</p>
-            <p class="muted">${escapeHtml(COMPANY.location)} · ${escapeHtml(COMPANY.email)}</p>
+            <span class="invoice-sheet__label">Investment total</span>
+            <p><strong>${escapeHtml(formatMoneyExact(chargeCents))}</strong> <span class="muted">CAD</span></p>
+            ${
+              (() => {
+                const details = clientLines.filter((l) => l !== clientBiz);
+                return details.length
+                  ? `<p class="muted">${details.map((l) => escapeHtml(l)).join("<br/>")}</p>`
+                  : "";
+              })()
+            }
           </div>
         </div>
+        ${
+          lineRows
+            ? `<table class="invoice-sheet__table">
+                <thead>
+                  <tr><th>Item</th><th class="num">Qty</th><th class="num">Rate</th><th class="num">Amount</th></tr>
+                </thead>
+                <tbody>${lineRows}</tbody>
+              </table>
+              ${totalsHtml}`
+            : totalsHtml
+        }
+        ${
+          quote.terms
+            ? `<div class="invoice-sheet__notes quote-sheet__section">
+                <span class="invoice-sheet__label">Terms &amp; conditions</span>
+                <p class="quote-sheet__pre">${escapeHtml(quote.terms)}</p>
+              </div>`
+            : ""
+        }
+        ${
+          quote.addendums
+            ? `<div class="invoice-sheet__notes quote-sheet__section">
+                <span class="invoice-sheet__label">Addendums</span>
+                <p class="quote-sheet__pre">${escapeHtml(quote.addendums)}</p>
+              </div>`
+            : ""
+        }
         ${
           attachList
             ? `<div class="invoice-sheet__notes quote-sheet__attachments">
                 <span class="invoice-sheet__label">Attached with this quote</span>
                 <ul>${attachList}</ul>
-                <p class="muted">Placeholder documents until final PDFs are uploaded.</p>
               </div>`
             : `<div class="invoice-sheet__notes"><p class="muted">No attachments selected for this quote.</p></div>`
+        }
+        ${
+          quote.status === "approved" || quote.alreadyPaid || (Number(quote.depositPaidCents) || 0) > 0
+            ? (() => {
+                const paidCents = Number(quote.depositPaidCents) || 0;
+                const payments = Array.isArray(quote.deposits) ? quote.deposits : [];
+                if (paidCents > 0 || payments.length) {
+                  const rows = payments.length
+                    ? payments
+                        .map(
+                          (dep) => `
+                      <div class="quote-sheet__pay-option">
+                        <strong>${escapeHtml(depositMethodLabel(dep.method))} · ${escapeHtml(
+                            formatMoneyExact(dep.amountCents)
+                          )}</strong>
+                        <p class="muted" style="margin:0.35rem 0 0">
+                          Received ${escapeHtml(formatDateTime(dep.createdAt) || formatDate(dep.createdAt) || "—")}
+                          ${
+                            dep.feeCents
+                              ? ` · card fee ${escapeHtml(formatMoneyExact(dep.feeCents))}`
+                              : ""
+                          }
+                        </p>
+                      </div>`
+                        )
+                        .join("")
+                    : `<div class="quote-sheet__pay-option">
+                        <strong>${escapeHtml(formatMoneyExact(paidCents))} received</strong>
+                        <p class="muted" style="margin:0.35rem 0 0">
+                          ${escapeHtml(depositMethodLabel(quote.depositPaidMethod))}
+                          ${
+                            quote.depositPaidAt
+                              ? ` · ${escapeHtml(formatDateTime(quote.depositPaidAt) || formatDate(quote.depositPaidAt))}`
+                              : ""
+                          }
+                        </p>
+                      </div>`;
+                  return `
+        <div class="quote-sheet__pay quote-sheet__pay--complete">
+          <span class="invoice-sheet__label">Deposit received</span>
+          <p class="muted" style="margin:0.35rem 0 0">
+            ${escapeHtml(formatMoneyExact(paidCents || depositDueCents))} of ${escapeHtml(
+                      formatMoneyExact(chargeCents)
+                    )} investment on file. Balance is invoiced later.
+          </p>
+          <div class="quote-sheet__pay-grid">${rows}</div>
+          ${
+            quote.signedName
+              ? `<p class="muted" style="margin:0.75rem 0 0">Signed by <strong>${escapeHtml(
+                  quote.signedName
+                )}</strong>${
+                  quote.signedAt
+                    ? ` · ${escapeHtml(formatDateTime(quote.signedAt) || formatDate(quote.signedAt))}`
+                    : ""
+                }</p>`
+              : ""
+          }
+        </div>`;
+                }
+                return `
+        <div class="quote-sheet__pay quote-sheet__pay--complete">
+          <span class="invoice-sheet__label">Approved — deposit pending</span>
+          <p class="muted" style="margin:0.35rem 0 0">
+            Quote is signed${
+              quote.signedName ? ` by <strong>${escapeHtml(quote.signedName)}</strong>` : ""
+            }${
+              quote.signedAt
+                ? ` · ${escapeHtml(formatDateTime(quote.signedAt) || formatDate(quote.signedAt))}`
+                : ""
+            }. Kickoff deposit of ${escapeHtml(formatMoneyExact(depositDueCents))} not received yet.
+          </p>
+        </div>`;
+              })()
+            : `
+        <div class="quote-sheet__pay">
+          <span class="invoice-sheet__label">Deposit due to begin</span>
+          <p class="muted" style="margin:0.35rem 0 0">Kickoff deposit only (${escapeHtml(
+            formatMoneyExact(depositDueCents)
+          )} of ${escapeHtml(formatMoneyExact(chargeCents))} investment). Balance is invoiced later.</p>
+          <div class="quote-sheet__pay-grid">
+            <div class="quote-sheet__pay-option">
+              <strong>Pay deposit via e-Transfer</strong>
+              <p class="quote-sheet__pay-amount">${escapeHtml(formatMoneyExact(depositDueCents))} <span class="muted">CAD</span></p>
+              <p class="muted">No extra fee. Send Interac to <strong>${escapeHtml(
+                COMPANY.accountingEmail
+              )}</strong>. Memo: <strong>${escapeHtml(quote.number || "quote number")}</strong>.</p>
+            </div>
+            <div class="quote-sheet__pay-option">
+              <strong>Pay deposit by card</strong>
+              <p class="quote-sheet__pay-amount">${escapeHtml(
+                formatMoneyExact(cardTotalCents(depositDueCents))
+              )} <span class="muted">CAD</span></p>
+              <p class="muted">${escapeHtml(formatMoneyExact(depositDueCents))} + 3.5% processing (${escapeHtml(
+                formatMoneyExact(cardFeeCents(depositDueCents))
+              )}). Use <strong>Copy pay link</strong> / Send for the card checkout URL.</p>
+            </div>
+          </div>
+        </div>`
         }
         <footer class="invoice-sheet__foot">
           Questions? Write <strong>${escapeHtml(COMPANY.email)}</strong>.
@@ -5116,6 +6036,23 @@
       els.quotePreview.innerHTML = "";
       return;
     }
+    const head = els.quotePreview.closest(".invoice-preview-wrap")?.querySelector(".invoice-preview-wrap__head");
+    if (head) {
+      const title = head.querySelector("h3");
+      const sub = head.querySelector(".muted");
+      const completed =
+        draft.status === "approved" ||
+        draft.alreadyPaid ||
+        (Number(draft.depositPaidCents) || 0) > 0;
+      if (title) title.textContent = completed ? "Completed quote" : "Letterhead preview";
+      if (sub) {
+        sub.textContent = completed
+          ? draft.alreadyPaid || (Number(draft.depositPaidCents) || 0) > 0
+            ? "Signed and deposit on file"
+            : "Signed — deposit still pending"
+          : "What the client receives";
+      }
+    }
     els.quotePreview.innerHTML = renderQuoteDocumentHtml(draft);
   }
 
@@ -5126,12 +6063,13 @@
     const styles = `
       body{margin:0;background:#fff;color:#1c2430;font-family:Segoe UI,Helvetica,Arial,sans-serif;}
       .invoice-sheet{max-width:760px;margin:0 auto;padding:28px;}
-      .invoice-sheet__brand{display:flex;justify-content:space-between;gap:1rem;padding:1.25rem 1.35rem;background:linear-gradient(135deg,#1c2430,#2d3a4a 55%,#3d3424);color:#f7f1e6;border-radius:12px;}
-      .invoice-sheet__brand-left{display:flex;gap:0.75rem;align-items:center;}
-      .invoice-sheet__brand-left img{width:72px;height:auto;background:#fff;border-radius:8px;padding:0.25rem;}
-      .invoice-sheet__brand-left strong{display:block;font-size:1.2rem;}
-      .invoice-sheet__brand-left span{opacity:0.85;}
-      .invoice-sheet__brand-left p{margin:0.35rem 0 0;font-size:0.78rem;opacity:0.8;max-width:16rem;}
+      .invoice-sheet__brand{display:flex;justify-content:space-between;gap:1rem;align-items:center;padding:1.1rem 1.25rem;background:#1f3a5f;color:#f4f7fb;border-radius:12px;}
+      .quote-sheet__brand-left{display:flex;flex-direction:column;align-items:flex-start;gap:0.45rem;}
+      .quote-sheet__brand-row{display:flex;align-items:center;gap:0.75rem;}
+      .quote-sheet__logo,.invoice-sheet__brand-left img{width:72px;height:auto;background:transparent!important;border-radius:0;padding:0;}
+      .quote-sheet__name strong{display:inline;font-size:1.25rem;}
+      .quote-sheet__name span{opacity:0.85;font-size:1.15rem;margin-left:0.25rem;}
+      .quote-sheet__tagline{margin:0;font-size:0.78rem;opacity:0.8;line-height:1.4;max-width:22rem;}
       .invoice-sheet__brand-right{text-align:right;}
       .invoice-sheet__kicker{font-size:0.7rem;letter-spacing:0.12em;text-transform:uppercase;opacity:0.75;}
       .invoice-sheet__brand-right h2{margin:0.2rem 0;font-size:1.6rem;}
@@ -5140,9 +6078,27 @@
       .invoice-sheet__label{display:block;font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:#8a7340;font-weight:700;margin-bottom:0.35rem;}
       .invoice-sheet__meta p{margin:0;line-height:1.5;font-size:0.92rem;}
       .invoice-sheet__meta-right{text-align:right;}
+      .quote-sheet__proposal{margin:0 0 1.15rem;}
+      .quote-sheet__proposal p{margin:0.25rem 0 0;line-height:1.5;font-size:0.92rem;}
+      .invoice-sheet__table{width:100%;border-collapse:collapse;margin:0.5rem 0 0;}
+      .invoice-sheet__table th{background:#f4efe4;font-size:0.7rem;letter-spacing:0.08em;text-transform:uppercase;color:#5c6570;padding:0.55rem 0.45rem;text-align:left;}
+      .invoice-sheet__table td{padding:0.6rem 0.45rem;border-bottom:1px solid #e6e1d6;font-size:0.88rem;}
+      .invoice-sheet__table .num{text-align:right;white-space:nowrap;}
+      .invoice-sheet__totals{width:min(100%,15rem);margin:0.9rem 0 0 auto;display:grid;gap:0.35rem;}
+      .invoice-sheet__totals > div{display:flex;justify-content:space-between;gap:1rem;font-size:0.9rem;}
+      .invoice-sheet__totals .is-total{padding-top:0.5rem;border-top:2px solid #1c2430;font-size:0.95rem;}
+      .quote-sheet__discount strong{color:#6b5a2e;}
+      .quote-sheet__discount-note{margin:0.45rem 0 0;font-size:0.82rem;line-height:1.45;color:#5c6570;white-space:pre-wrap;}
+      .invoice-sheet__totals .is-total .muted,.invoice-sheet__meta-right .muted{font-weight:500;font-size:0.85em;}
+      .quote-sheet__pay{margin-top:1.25rem;}
+      .quote-sheet__pay-grid{margin-top:0.55rem;display:grid;gap:0.65rem;grid-template-columns:1fr 1fr;}
+      .quote-sheet__pay-option{padding:0.85rem 0.95rem;border-radius:12px;border:1px solid #e6e1d6;background:#f7f2e8;}
+      .quote-sheet__pay-amount{margin:0.4rem 0 0;font-size:1.15rem;font-weight:700;}
+      .quote-sheet__pay-option .muted{margin:0.4rem 0 0;font-size:0.82rem;line-height:1.45;}
       .invoice-sheet__notes{margin-top:1.25rem;padding:0.85rem 1rem;background:#f7f2e8;border-radius:10px;}
       .invoice-sheet__notes ul{margin:0.4rem 0 0;padding-left:1.1rem;}
       .invoice-sheet__notes p{margin:0.35rem 0 0;font-size:0.86rem;line-height:1.45;}
+      .quote-sheet__pre{white-space:pre-wrap;}
       .invoice-sheet__foot{margin-top:1.5rem;padding-top:0.9rem;border-top:1px solid #e6e1d6;font-size:0.82rem;color:#5c6570;line-height:1.5;}
       .muted{color:#5c6570;}
       @media print{body{background:#fff}.invoice-sheet{padding:0}}
@@ -5172,12 +6128,14 @@
           body: JSON.stringify(payload),
         })
       : await api("/api/quotes", { method: "POST", body: JSON.stringify(payload) });
+    if (!Array.isArray(data.quote.files)) data.quote.files = state.quoteFiles || [];
     upsertQuote(data.quote, { silent: keepOpen });
     els.quoteForm.id.value = data.quote.id;
     els.quoteForm.number.value = data.quote.number || "";
     els.quoteDrawerTitle.textContent = data.quote.number;
     els.quoteDrawerMeta.textContent = statusMeta(QUOTE_STATUSES, data.quote.status).label;
     renderQuoteAttachments(data.quote.documentIds || defaultQuoteDocumentIds());
+    setQuoteFiles(data.quote.files || state.quoteFiles || []);
     refreshQuotePreview();
     setQuoteScheduleBuildVisible(data.quote.status !== "declined");
     if (!keepOpen) {
@@ -5197,20 +6155,64 @@
       return;
     }
     if (quote.hasSignature || (quote.status === "approved" && quote.signedName)) {
+      const paidCents = Number(quote.depositPaidCents) || 0;
+      const payments = Array.isArray(quote.deposits) ? quote.deposits : [];
+      const payBlock =
+        paidCents > 0
+          ? `<div class="quote-signature-panel__pay">
+              <p><strong>Deposit received · ${escapeHtml(formatMoneyExact(paidCents))}</strong></p>
+              ${
+                payments.length
+                  ? `<ul class="quote-signature-panel__pay-list">${payments
+                      .map(
+                        (dep) => `<li>${escapeHtml(depositMethodLabel(dep.method))} · ${escapeHtml(
+                          formatMoneyExact(dep.amountCents)
+                        )} · ${escapeHtml(
+                          formatDateTime(dep.createdAt) || formatDate(dep.createdAt) || "—"
+                        )}${
+                          dep.feeCents
+                            ? ` <span class="muted">(fee ${escapeHtml(formatMoneyExact(dep.feeCents))})</span>`
+                            : ""
+                        }</li>`
+                      )
+                      .join("")}</ul>`
+                  : `<p class="field-help">${escapeHtml(depositMethodLabel(quote.depositPaidMethod))}${
+                      quote.depositPaidAt
+                        ? ` · ${escapeHtml(
+                            formatDateTime(quote.depositPaidAt) || formatDate(quote.depositPaidAt)
+                          )}`
+                        : ""
+                    }</p>`
+              }
+            </div>`
+          : quote.status === "approved"
+            ? `<p class="field-help quote-signature-panel__pay-pending">Deposit not received yet (due ${escapeHtml(
+                formatMoneyExact(
+                  quote.depositDueCents != null
+                    ? quote.depositDueCents
+                    : defaultQuoteDepositCents(quote.amountCents || 0)
+                )
+              )}).</p>`
+            : "";
       panel.innerHTML = `
         <p><strong>Signed by ${escapeHtml(quote.signedName || "Client")}</strong>
-        ${quote.signedAt ? ` · ${escapeHtml(formatDate(quote.signedAt))}` : ""}</p>
+        ${quote.signedAt ? ` · ${escapeHtml(formatDateTime(quote.signedAt) || formatDate(quote.signedAt))}` : ""}</p>
         ${
           quote.signaturePng
             ? `<div class="quote-signature-panel__img"><img src="${escapeHtml(
                 quote.signaturePng
               )}" alt="Client signature" /></div>`
             : `<p class="field-help">Signature on file.</p>`
-        }`;
+        }
+        ${payBlock}`;
       return;
     }
     if (quote.awaitingSignature || quote.status === "sent" || quote.status === "revisions_requested") {
+      const viewed = quote.clientViewedAt
+        ? `<p class="field-help">Client opened the quote <strong>${escapeHtml(formatDate(quote.clientViewedAt))}</strong>.</p>`
+        : `<p class="field-help">Not opened by the client yet — you’ll get an email when they view it.</p>`;
       panel.innerHTML = `<p class="quote-signature-panel__await">Awaiting client signature</p>
+        ${viewed}
         <p class="field-help">The client received a secure <strong>Review &amp; sign</strong> link. Signing sets this quote to Approved.</p>`;
       return;
     }
@@ -5234,22 +6236,68 @@
       /* use list payload */
     }
     els.quoteDrawerTitle.textContent = quote.number;
-    els.quoteDrawerMeta.textContent = statusMeta(QUOTE_STATUSES, quote.status).label;
+    {
+      const paidCents = Number(quote.depositPaidCents) || 0;
+      const statusLabel = statusMeta(QUOTE_STATUSES, quote.status).label;
+      els.quoteDrawerMeta.textContent =
+        paidCents > 0
+          ? `${statusLabel} · deposit ${formatMoneyExact(paidCents)} received${
+              quote.depositPaidAt
+                ? ` · ${formatDateTime(quote.depositPaidAt) || formatDate(quote.depositPaidAt)}`
+                : ""
+            }`
+          : statusLabel;
+    }
     els.quoteForm.id.value = quote.id;
     els.quoteForm.number.value = quote.number || "";
     els.quoteForm.title.value = quote.title || "";
     els.quoteForm.clientName.value = quote.clientName || "";
     els.quoteForm.status.value = quote.status || "draft";
-    els.quoteForm.amount.value = ((quote.amountCents || 0) / 100).toFixed(2);
     els.quoteForm.ownerEmail.value = quote.ownerEmail || state.reminderSettings?.ownerEmail || "";
     els.quoteForm.notes.value = quote.notes || "";
+    if (els.quoteForm.terms) els.quoteForm.terms.value = quote.terms || "";
+    if (els.quoteForm.addendums) els.quoteForm.addendums.value = quote.addendums || "";
+    if (els.quoteForm.discount) {
+      els.quoteForm.discount.value = dollarsFromCents(quote.discountCents || 0);
+    }
+    if (els.quoteForm.discountLabel) {
+      els.quoteForm.discountLabel.value = quote.discountLabel || "";
+    }
+    if (els.quoteForm.discountNote) {
+      els.quoteForm.discountNote.value = quote.discountNote || "";
+    }
     if (els.quoteForm.leadId) els.quoteForm.leadId.value = quote.leadId || "";
     fillQuoteLeadPicker(quote.leadId || "");
     setQuoteScheduleBuildVisible(quote.status !== "declined");
+    const lines =
+      quote.lineItems?.length
+        ? quote.lineItems
+        : [
+            emptyQuoteLine({
+              description: quote.title || "Quoted work",
+              qty: 1,
+              unitCents: quote.amountCents || 0,
+            }),
+          ];
+    const openAmount =
+      Number(quote.amountCents) ||
+      Math.max(0, (Number(quote.subtotalCents) || 0) - (Number(quote.discountCents) || 0));
+    const openDeposit =
+      quote.depositDueCents != null
+        ? Number(quote.depositDueCents)
+        : quote.depositCents != null
+          ? Number(quote.depositCents)
+          : defaultQuoteDepositCents(openAmount);
+    const depositIsDefault = openDeposit === defaultQuoteDepositCents(openAmount);
+    setQuoteDepositField(openDeposit, { manual: !depositIsDefault });
+    renderQuoteLines(lines);
     renderQuoteAttachments(quote.documentIds || []);
+    setQuoteFiles(quote.files || []);
     renderQuoteSignaturePanel(quote);
+    syncQuoteClientPreviewButton(quote);
     refreshQuotePreview();
     openOnly(els.quoteDrawer, { create: false, deleteBtn: els.deleteQuote });
+    writeAppRoute("quotes", id);
   }
 
   function openNewQuote({ leadId = "", clientName = "" } = {}) {
@@ -5259,14 +6307,25 @@
       : "Search and select a client, then fill the quote";
     els.quoteForm.reset();
     els.quoteForm.id.value = "";
+    els.quoteForm.number.value = "";
+    els.quoteForm.number.placeholder = suggestNextQuoteNumber();
     els.quoteForm.status.value = "draft";
     els.quoteForm.ownerEmail.value = state.reminderSettings?.ownerEmail || "";
+    if (els.quoteForm.terms) els.quoteForm.terms.value = DEFAULT_QUOTE_TERMS;
+    if (els.quoteForm.addendums) els.quoteForm.addendums.value = "";
+    if (els.quoteForm.discount) els.quoteForm.discount.value = "0";
+    if (els.quoteForm.discountLabel) els.quoteForm.discountLabel.value = "";
+    if (els.quoteForm.discountNote) els.quoteForm.discountNote.value = "";
+    setQuoteDepositField(0, { manual: false });
     if (els.quoteForm.leadId) els.quoteForm.leadId.value = leadId || "";
     if (clientName) els.quoteForm.clientName.value = clientName;
     fillQuoteLeadPicker(leadId || "");
     setQuoteScheduleBuildVisible(false);
+    renderQuoteLines(DEFAULT_QUOTE_LINES());
     renderQuoteAttachments(defaultQuoteDocumentIds());
+    setQuoteFiles([]);
     renderQuoteSignaturePanel(null);
+    syncQuoteClientPreviewButton(null);
     refreshQuotePreview();
     openOnly(els.quoteDrawer, { create: true, deleteBtn: els.deleteQuote });
     setTimeout(() => {
@@ -5413,13 +6472,23 @@
     els.invoiceForm.title.value = quote.title || els.invoiceForm.title.value;
     els.invoiceForm.clientName.value = quote.clientName || els.invoiceForm.clientName.value;
     if (quote.notes && !els.invoiceForm.notes.value) els.invoiceForm.notes.value = quote.notes;
-    renderInvoiceLines([
-      emptyInvoiceLine({
-        description: quote.title || "Quoted work",
-        qty: 1,
-        unitCents: quote.amountCents || 0,
-      }),
-    ]);
+    renderInvoiceLines(
+      quote.lineItems?.length
+        ? quote.lineItems.map((line) =>
+            emptyInvoiceLine({
+              description: line.description,
+              qty: line.qty,
+              unitCents: line.unitCents,
+            })
+          )
+        : [
+            emptyInvoiceLine({
+              description: quote.title || "Quoted work",
+              qty: 1,
+              unitCents: quote.amountCents || 0,
+            }),
+          ]
+    );
     fillInvoicePickers({
       leadId: els.invoiceForm.leadId.value,
       quoteId: quote.id,
@@ -5584,8 +6653,25 @@
           <div><span>Tax (${escapeHtml(String(invoice.taxRate || 0))}%)</span><strong>${escapeHtml(
             formatMoneyExact(invoice.taxCents)
           )}</strong></div>
-          <div class="is-total"><span>Total due</span><strong>${escapeHtml(
+          <div><span>Invoice total</span><strong>${escapeHtml(
             formatMoneyExact(invoice.amountCents)
+          )}</strong></div>
+          ${
+            Number(invoice.depositAvailableCents) > 0
+              ? `<div><span>Deposit applied</span><strong>−${escapeHtml(
+                  formatMoneyExact(invoice.depositAvailableCents)
+                )}</strong></div>`
+              : ""
+          }
+          <div class="is-total"><span>Balance due</span><strong>${escapeHtml(
+            formatMoneyExact(
+              invoice.balanceDueCents != null
+                ? invoice.balanceDueCents
+                : Math.max(
+                    0,
+                    (invoice.amountCents || 0) - (invoice.depositAvailableCents || 0)
+                  )
+            )
           )}</strong></div>
         </div>
         ${
@@ -5596,8 +6682,9 @@
             : ""
         }
         <footer class="invoice-sheet__foot">
-          Please pay by e-transfer or arranged terms to <strong>${escapeHtml(COMPANY.email)}</strong>.
-          Thank you for your business — ${escapeHtml(COMPANY.name)}.
+          Interac (no fee) to <strong>${escapeHtml(COMPANY.accountingEmail)}</strong>.
+          Card payments include 3.5% processing.
+          Thank you — ${escapeHtml(COMPANY.name)}.
         </footer>
       </article>`;
   }
@@ -5609,6 +6696,15 @@
       els.invoicePreview.innerHTML = "";
       return;
     }
+    const leadId = draft.leadId || "";
+    const available =
+      state.clientDetail?.lead?.id === leadId
+        ? Number(state.clientDetail.depositAvailableCents) || 0
+        : Number(
+            (state.invoices || []).find((inv) => inv.id === draft.id)?.depositAvailableCents
+          ) || 0;
+    draft.depositAvailableCents = available;
+    draft.balanceDueCents = Math.max(0, (draft.amountCents || 0) - available);
     els.invoicePreview.innerHTML = renderInvoiceDocumentHtml(draft);
   }
 
@@ -5619,7 +6715,7 @@
     const styles = `
       body{margin:0;background:#fff;color:#1c2430;font-family:Segoe UI,Helvetica,Arial,sans-serif;}
       .invoice-sheet{max-width:760px;margin:0 auto;padding:28px;}
-      .invoice-sheet__brand{display:flex;justify-content:space-between;gap:1rem;padding:1.25rem 1.35rem;background:linear-gradient(135deg,#1c2430,#2d3a4a 55%,#3d3424);color:#f7f1e6;border-radius:12px;}
+      .invoice-sheet__brand{display:flex;justify-content:space-between;gap:1rem;padding:1.25rem 1.35rem;background:#1f3a5f;color:#f4f7fb;border-radius:12px;}
       .invoice-sheet__brand-left{display:flex;gap:0.75rem;align-items:center;}
       .invoice-sheet__brand-left img{width:72px;height:auto;background:#fff;border-radius:8px;padding:0.25rem;}
       .invoice-sheet__brand-left strong{display:block;font-size:1.2rem;}
@@ -5737,6 +6833,7 @@
           ];
     renderInvoiceLines(lines);
     openOnly(els.invoiceDrawer, { create: false, deleteBtn: els.deleteInvoice });
+    writeAppRoute("invoices", id);
   }
 
   function openNewInvoice({ leadId = "", clientName = "", quoteId = "", jobId = "" } = {}) {
@@ -6210,7 +7307,7 @@
     renderQuoteLeadResults(value);
   });
   els.quoteLeadSearch?.addEventListener("focus", () => {
-    if (els.quoteLeadSearch.value.trim()) renderQuoteLeadResults(els.quoteLeadSearch.value);
+    renderQuoteLeadResults(els.quoteLeadSearch.value, { immediate: true });
   });
   els.quoteLeadSearch?.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
@@ -6290,10 +7387,54 @@
     }
   });
 
-  els.quoteForm.addEventListener("input", () => refreshQuotePreview());
-  els.quoteForm.addEventListener("change", () => refreshQuotePreview());
+  els.quoteForm.addEventListener("input", (event) => {
+    if (event.target?.name === "deposit" && els.quoteForm?.deposit) {
+      els.quoteForm.deposit.dataset.manual = "1";
+    }
+    refreshQuotePreview();
+  });
+  els.quoteForm.addEventListener("change", (event) => {
+    if (event.target?.name === "deposit" && els.quoteForm?.deposit) {
+      els.quoteForm.deposit.dataset.manual = "1";
+    }
+    refreshQuotePreview();
+  });
 
   els.printQuote?.addEventListener("click", () => printQuoteDocument());
+
+  async function copyPayLink(kind) {
+    const form = kind === "quote" ? els.quoteForm : els.invoiceForm;
+    let id = form?.id?.value;
+    if (!id) {
+      toast(kind === "quote" ? "Save the quote first" : "Save the invoice first");
+      return;
+    }
+    try {
+      if (kind === "quote") await saveQuoteRecord({ keepOpen: true });
+      else await saveInvoiceRecord({ keepOpen: true, markSent: false });
+      id = form.id.value;
+      const data = await api(
+        `/api/${kind === "quote" ? "quotes" : "invoices"}/${encodeURIComponent(id)}/pay-link`,
+        { method: "POST", body: "{}" }
+      );
+      await navigator.clipboard.writeText(data.payUrl);
+      toast("Pay link copied");
+    } catch (err) {
+      toast(err.message || "Could not copy pay link");
+    }
+  }
+
+  els.copyQuotePayLink?.addEventListener("click", () => copyPayLink("quote"));
+  els.copyInvoicePayLink?.addEventListener("click", () => copyPayLink("invoice"));
+
+  els.previewQuoteClient?.addEventListener("click", () => {
+    const url = els.previewQuoteClient.dataset.previewUrl || "";
+    if (!url) {
+      toast("Send the quote first to get a client preview link");
+      return;
+    }
+    window.open(url, "_blank", "noopener,noreferrer");
+  });
 
   els.sendQuote?.addEventListener("click", async () => {
     const sendBtn = els.sendQuote;
@@ -6302,6 +7443,14 @@
       const draft = collectQuoteDraft();
       if (!draft?.leadId) {
         toast("Link a client before sending");
+        return;
+      }
+      if (draft.status === "approved" || draft.alreadyPaid || (Number(draft.depositPaidCents) || 0) > 0) {
+        toast("Already approved/paid — don’t Send again. Use Copy pay link if needed.");
+        return;
+      }
+      if (draft.status === "declined") {
+        toast("Declined quotes can’t be resent — create a new quote");
         return;
       }
       const lead = state.leads.find((l) => l.id === draft.leadId);
@@ -6323,6 +7472,7 @@
       els.quoteDrawerMeta.textContent = statusMeta(QUOTE_STATUSES, data.quote.status).label;
       renderQuoteAttachments(data.quote.documentIds || []);
       renderQuoteSignaturePanel(data.quote);
+      syncQuoteClientPreviewButton(data.quote);
       refreshQuotePreview();
       const n = (data.documents || []).length;
       const channel = data.delivery?.channel;
@@ -6361,6 +7511,14 @@
 
   els.invoiceForm.addEventListener("input", () => refreshInvoicePreview());
   els.invoiceForm.addEventListener("change", () => refreshInvoicePreview());
+
+  els.quoteAddLine?.addEventListener("click", () => {
+    const lines = readQuoteLinesFromDom();
+    lines.push(emptyQuoteLine());
+    renderQuoteLines(lines);
+  });
+
+  bindQuoteFileDrop();
 
   els.invoiceAddLine?.addEventListener("click", () => {
     const lines = readInvoiceLinesFromDom();
@@ -6465,14 +7623,26 @@
 
   mountRewriteControls(document);
   startIdleWatch();
+  window.addEventListener("hashchange", () => {
+    applyAppRoute().catch((err) => console.error(err));
+  });
+
+  // Restore the last screen immediately so refresh never flashes Home first.
+  const bootRoute = parseAppRoute();
+  suppressRouteWrite = true;
+  setView(bootRoute.view);
+  suppressRouteWrite = false;
+  writeAppRoute(bootRoute.view, bootRoute.id);
+
   loadSession()
-    .then(() => {
-      setView("home");
-      return refresh();
+    .then(async () => {
+      await refresh();
+      await applyAppRoute();
     })
     .catch((err) => {
       console.error(err);
-      setView("home");
+      const { view } = parseAppRoute();
+      setView(VIEW_COPY[view] ? view : "home");
       toast("Could not load CRM data");
     });
 })();

@@ -2536,8 +2536,8 @@ body.is-dragging-job .unscheduled-list {
   justify-content: space-between;
   gap: 1rem;
   padding: 1.15rem 1.2rem;
-  background: linear-gradient(135deg, #1c2430 0%, #2d3a4a 55%, #3d3424 100%);
-  color: #f7f1e6;
+  background: #1f3a5f;
+  color: #f4f7fb;
 }
 
 .invoice-sheet__brand-left {
@@ -2552,6 +2552,181 @@ body.is-dragging-job .unscheduled-list {
   background: #fff;
   border-radius: 8px;
   padding: 0.2rem;
+}
+
+.quote-sheet .invoice-sheet__brand {
+  align-items: center;
+}
+
+.quote-sheet__brand-left {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.45rem;
+}
+
+.quote-sheet__brand-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.quote-sheet .quote-sheet__logo,
+.quote-sheet .invoice-sheet__brand-left img {
+  width: 72px;
+  height: auto;
+  background: transparent !important;
+  border-radius: 0;
+  padding: 0;
+  box-shadow: none;
+  mix-blend-mode: normal;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.quote-sheet__name {
+  display: flex;
+  align-items: baseline;
+  gap: 0.28rem;
+  line-height: 1.1;
+}
+
+.quote-sheet__name strong {
+  display: inline;
+  font-size: 1.2rem;
+  letter-spacing: -0.02em;
+}
+
+.quote-sheet__name span {
+  opacity: 0.85;
+  font-size: 1.1rem;
+}
+
+.quote-sheet__tagline {
+  margin: 0;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  opacity: 0.8;
+  max-width: 22rem;
+}
+
+.quote-sheet__pre {
+  white-space: pre-wrap;
+}
+
+.quote-sheet__section + .quote-sheet__section {
+  margin-top: 0.75rem;
+}
+
+.quote-pricing-panel {
+  margin-top: 0.75rem;
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.75rem 0.85rem;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.35);
+}
+
+.quote-discount-row {
+  align-items: end;
+}
+
+.quote-total-line {
+  margin: 0;
+  font-size: 0.92rem;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.4rem;
+}
+
+.quote-total-line strong {
+  font-size: 1.05rem;
+  letter-spacing: -0.02em;
+}
+
+.quote-total-line--charge {
+  margin-top: 0.15rem;
+  padding-top: 0.55rem;
+  border-top: 1px solid var(--line);
+}
+
+.quote-total-line--charge strong {
+  font-size: 1.2rem;
+}
+
+.quote-sheet__proposal {
+  margin: 0 0 1.15rem;
+}
+
+.quote-sheet__proposal p {
+  margin: 0.25rem 0 0;
+  line-height: 1.5;
+  font-size: 0.92rem;
+}
+
+.quote-sheet__pricing {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.quote-sheet__list-price strong {
+  text-decoration: line-through;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.quote-sheet__discount strong {
+  color: #6b5a2e;
+}
+
+.quote-sheet__discount-note {
+  margin: 0.45rem 0 0;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--muted);
+  white-space: pre-wrap;
+}
+
+.quote-sheet__pay {
+  margin-top: 1.25rem;
+}
+
+.quote-sheet__pay-grid {
+  margin-top: 0.55rem;
+  display: grid;
+  gap: 0.65rem;
+}
+
+@media (min-width: 640px) {
+  .quote-sheet__pay-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.quote-sheet__pay-option {
+  padding: 0.85rem 0.95rem;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(247, 242, 232, 0.85);
+}
+
+.quote-sheet__pay-option strong {
+  display: block;
+  font-size: 0.95rem;
+}
+
+.quote-sheet__pay-amount {
+  margin: 0.4rem 0 0;
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+.quote-sheet__pay-option .muted {
+  margin: 0.4rem 0 0;
+  font-size: 0.82rem;
+  line-height: 1.45;
 }
 
 .invoice-sheet__brand-left strong {
@@ -2782,9 +2957,161 @@ body.is-dragging-job .unscheduled-list {
   height: auto;
 }
 
+.quote-signature-panel__pay {
+  margin-top: 0.85rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(244, 241, 234, 0.1);
+}
+
+.quote-signature-panel__pay p {
+  margin: 0;
+}
+
+.quote-signature-panel__pay-list {
+  margin: 0.4rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.quote-signature-panel__pay-pending {
+  margin-top: 0.75rem !important;
+  color: #d4b56a;
+}
+
+.quote-sheet__pay--complete .invoice-sheet__label {
+  color: #2f6b4f;
+}
+
+.client-deposits {
+  margin: 0 0 1.25rem;
+}
+
+.client-deposit-form {
+  display: grid;
+  gap: 0.55rem;
+  margin-bottom: 0.75rem;
+}
+
+.client-deposit-list {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.client-deposit-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.65rem;
+  align-items: center;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255, 252, 246, 0.7);
+}
+
+.client-deposit-row__meta {
+  display: grid;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.client-deposit-row__meta strong {
+  font-size: 0.92rem;
+}
+
+.client-deposit-row__meta .muted {
+  font-size: 0.76rem;
+}
+
+.client-deposit-row__actions {
+  display: flex;
+  gap: 0.25rem;
+}
+
 .quote-attachments {
   display: grid;
   gap: 0.45rem;
+}
+
+.quote-file-drop {
+  margin-top: 0.75rem;
+  padding: 1.1rem 1rem;
+  border: 1.5px dashed #c9bfa8;
+  border-radius: 12px;
+  background: rgba(255, 252, 246, 0.55);
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.quote-file-drop:hover,
+.quote-file-drop:focus-visible {
+  border-color: #8a7340;
+  background: rgba(247, 242, 232, 0.9);
+  outline: none;
+}
+
+.quote-file-drop.is-dragover {
+  border-color: #8a7340;
+  background: rgba(232, 220, 188, 0.55);
+  box-shadow: inset 0 0 0 1px rgba(138, 115, 64, 0.25);
+}
+
+.quote-file-drop.is-busy {
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+.quote-file-drop__title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 650;
+}
+
+.quote-file-drop__hint {
+  margin: 0.3rem 0 0;
+  font-size: 0.8rem;
+}
+
+.quote-file-list {
+  margin-top: 0.55rem;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.quote-file-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.65rem;
+  align-items: center;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255, 252, 246, 0.7);
+}
+
+.quote-file-row__meta {
+  display: grid;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.quote-file-row__meta strong {
+  font-size: 0.88rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quote-file-row__meta .muted {
+  font-size: 0.76rem;
+}
+
+.quote-file-row__actions {
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
 }
 
 .quote-attach-row {
@@ -4888,4 +5215,237 @@ body.is-dragging-job .unscheduled-list {
   background: rgba(255, 255, 255, 0.12);
   color: #fff;
   border: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+/* —— PDF editor —— */
+#view-pdf {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+.pdf-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-height: calc(100vh - 9.5rem);
+}
+
+.pdf-editor__banner {
+  padding: 0.65rem 0.9rem;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: linear-gradient(135deg, rgba(184, 149, 62, 0.14), rgba(31, 122, 108, 0.1));
+  color: var(--ink-mid);
+  font-size: 0.92rem;
+  font-weight: 500;
+}
+
+.pdf-editor__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem 0.75rem;
+  align-items: center;
+  padding: 0.7rem 0.8rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  box-shadow: var(--shadow-inset);
+}
+
+.pdf-editor__group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.pdf-editor__group + .pdf-editor__group {
+  padding-left: 0.75rem;
+  border-left: 1px solid var(--line);
+}
+
+.pdf-editor__tools .pdf-tool.is-active {
+  background: var(--ink);
+  color: #f7f4ee;
+  border-color: transparent;
+}
+
+.pdf-editor__field {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.pdf-editor__field input[type="color"] {
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--surface-2);
+  cursor: pointer;
+}
+
+.pdf-editor__field input[type="range"] {
+  width: 5.5rem;
+  accent-color: var(--teal);
+}
+
+.pdf-editor__field select {
+  min-width: 7.5rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 8px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface-2);
+}
+
+.pdf-editor__size-val {
+  min-width: 1.6rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+  color: var(--ink-text);
+}
+
+.pdf-editor__text-props.is-editing {
+  box-shadow: inset 0 0 0 1px rgba(31, 122, 108, 0.35);
+  border-radius: 10px;
+  padding: 0.25rem 0.4rem;
+  background: rgba(31, 122, 108, 0.08);
+}
+
+.pdf-editor__stage[data-tool="select"] .pdf-page__overlay {
+  cursor: default;
+}
+
+.pdf-editor__swatches {
+  display: inline-flex;
+  gap: 0.3rem;
+}
+
+.pdf-swatch {
+  width: 1.35rem;
+  height: 1.35rem;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: var(--swatch, #141820);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25);
+}
+
+.pdf-swatch.is-active {
+  outline: 2px solid var(--teal);
+  outline-offset: 1px;
+}
+
+.pdf-editor__page {
+  min-width: 4.2rem;
+  text-align: center;
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.pdf-editor__stage {
+  flex: 1;
+  min-height: 28rem;
+  max-height: calc(100vh - 14rem);
+  overflow: auto;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background:
+    linear-gradient(180deg, rgba(20, 24, 32, 0.04), transparent 40%),
+    var(--bg-deep);
+  outline: none;
+}
+
+.pdf-editor__stage[data-tool="pen"],
+.pdf-editor__stage[data-tool="highlight"],
+.pdf-editor__stage[data-tool="text"],
+.pdf-editor__stage[data-tool="blank"],
+.pdf-editor__stage[data-tool="stamp"],
+.pdf-editor__stage[data-tool="eraser"] {
+  cursor: crosshair;
+}
+
+.pdf-editor__patch-status {
+  margin: 0;
+  padding: 0.45rem 0.75rem;
+  border-radius: 10px;
+  border: 1px solid rgba(31, 122, 108, 0.28);
+  background: rgba(31, 122, 108, 0.1);
+  color: var(--ink-mid);
+  font-size: 0.88rem;
+  font-weight: 550;
+}
+
+.pdf-editor__stage[data-tool="select"] {
+  cursor: default;
+}
+
+.pdf-editor__empty {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 0.65rem;
+  min-height: 22rem;
+  padding: 2rem 1.25rem;
+  text-align: center;
+}
+
+.pdf-editor__empty strong {
+  font-size: 1.2rem;
+  font-weight: 650;
+}
+
+.pdf-editor__empty p {
+  margin: 0;
+  max-width: 28rem;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.pdf-editor__pages {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  padding: 1.25rem 1rem 2rem;
+}
+
+.pdf-page {
+  position: relative;
+  background: #fff;
+  box-shadow: var(--shadow-md);
+  border-radius: 2px;
+}
+
+.pdf-page__canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.pdf-page__overlay {
+  display: block;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
+@media (max-width: 900px) {
+  .pdf-editor__group + .pdf-editor__group {
+    padding-left: 0;
+    border-left: 0;
+  }
+
+  .pdf-editor__stage {
+    max-height: calc(100vh - 16rem);
+    min-height: 20rem;
+  }
 }

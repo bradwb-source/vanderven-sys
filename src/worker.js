@@ -456,12 +456,37 @@ async function sha256Hex(value) {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-function originFromRequest(request) {
+/** Prefer PUBLIC_APP_ORIGIN so email links match vanderven.ca (not workers.dev). */
+function publicAppOrigin(env, requestOrUrl = "") {
+  const configured = cleanText(env?.PUBLIC_APP_ORIGIN || "", 240).replace(/\/+$/, "");
+  if (configured) {
+    try {
+      return new URL(configured).origin;
+    } catch {
+      /* ignore bad config */
+    }
+  }
+  try {
+    if (requestOrUrl && typeof requestOrUrl === "object" && requestOrUrl.url) {
+      return new URL(requestOrUrl.url).origin;
+    }
+    if (typeof requestOrUrl === "string" && requestOrUrl) {
+      return new URL(requestOrUrl).origin;
+    }
+  } catch {
+    /* ignore */
+  }
+  return "";
+}
+
+function originFromRequest(request, env = null) {
+  const preferred = publicAppOrigin(env, request);
+  if (preferred) return preferred;
   try {
     const url = new URL(request.url);
     return `${url.protocol}//${url.host}`;
   } catch {
-    return "https://vanderven.ca";
+    return "https://app.vanderven.ca";
   }
 }
 
@@ -502,7 +527,7 @@ async function requestPasswordReset(env, emailRaw, request) {
       .bind(id, user.id, email, tokenHash, expiresAt, ts)
       .run();
 
-    const origin = originFromRequest(request);
+    const origin = originFromRequest(request, env);
     const link = `${origin}/login?reset=${encodeURIComponent(token)}`;
     await deliverReminder(env, {
       toEmail: email,
@@ -2251,15 +2276,22 @@ async function getLeadDetail(env, id) {
   const activity = await listStoredActivity(env, id);
   const timeline = buildTimeline(lead, { notes, activity, ...related });
   const callRecordings = await listCallRecordingsForLead(env, id);
+  const deposits = await listDepositsForLead(env, id);
+  const depositAvailableCents = await availableDepositCents(env, id);
+  const invoices = await Promise.all(
+    (related.invoices || []).map((invoice) => enrichInvoicePayments(env, invoice))
+  );
   return {
     lead,
     notes,
     activity: timeline,
     quotes: related.quotes,
     jobs: related.jobs,
-    invoices: related.invoices,
+    invoices,
     reminders: related.reminders,
     callRecordings,
+    deposits,
+    depositAvailableCents,
   };
 }
 
@@ -2620,8 +2652,94 @@ function moneyToCents(value, { alreadyCents = false } = {}) {
   return alreadyCents ? Math.round(num) : Math.round(num * 100);
 }
 
+function resolveQuotePricing(body = {}, existing = null) {
+  const title =
+    body.title !== undefined ? cleanText(body.title, 160) : existing?.title || "";
+  let lineItems;
+  if (body.lineItems !== undefined || body.line_items !== undefined) {
+    lineItems = parseInvoiceLineItems(body.lineItems ?? body.line_items, "", 0);
+  } else if (existing?.line_items_json) {
+    lineItems = parseInvoiceLineItems(
+      existing.line_items_json,
+      existing.title,
+      existing.amount_cents
+    );
+  } else {
+    const amountCents =
+      body.amountCents !== undefined || body.amount_cents !== undefined
+        ? moneyToCents(body.amountCents ?? body.amount_cents, { alreadyCents: true })
+        : body.amount !== undefined
+          ? moneyToCents(body.amount)
+          : Number(existing?.amount_cents) || 0;
+    lineItems = parseInvoiceLineItems([], title || "Quoted work", amountCents);
+  }
+  if (!lineItems.length) {
+    lineItems = [{ id: "line_1", description: title || "Quoted work", qty: 1, unitCents: 0 }];
+  }
+  const totals = invoiceTotals(lineItems, 0);
+  const subtotalCents = totals.subtotalCents;
+  let discountCents = 0;
+  if (body.discountCents !== undefined || body.discount_cents !== undefined) {
+    discountCents = moneyToCents(body.discountCents ?? body.discount_cents, { alreadyCents: true });
+  } else if (body.discount !== undefined) {
+    discountCents = moneyToCents(body.discount);
+  } else if (existing?.discount_cents != null) {
+    discountCents = Number(existing.discount_cents) || 0;
+  }
+  discountCents = Math.max(0, Math.min(subtotalCents, Math.round(discountCents) || 0));
+  const discountLabel =
+    body.discountLabel !== undefined || body.discount_label !== undefined
+      ? cleanText(body.discountLabel ?? body.discount_label, 120)
+      : existing?.discount_label != null
+        ? cleanText(existing.discount_label, 120)
+        : "";
+  const discountNote =
+    body.discountNote !== undefined || body.discount_note !== undefined
+      ? cleanText(body.discountNote ?? body.discount_note, 2000)
+      : existing?.discount_note != null
+        ? cleanText(existing.discount_note, 2000)
+        : "";
+  return {
+    lineItems,
+    subtotalCents,
+    discountCents,
+    discountLabel: discountCents ? discountLabel || "Discount" : discountLabel,
+    discountNote,
+    amountCents: Math.max(0, subtotalCents - discountCents),
+    terms:
+      body.terms !== undefined
+        ? cleanText(body.terms, 12000)
+        : existing?.terms != null
+          ? String(existing.terms)
+          : "",
+    addendums:
+      body.addendums !== undefined
+        ? cleanText(body.addendums, 12000)
+        : existing?.addendums != null
+          ? String(existing.addendums)
+          : "",
+  };
+}
+
 function rowToQuote(row, { includeSignature = false } = {}) {
   const hasSignature = Boolean(row.signature_png && String(row.signature_png).length > 40);
+  const lineItems = parseInvoiceLineItems(
+    row.line_items_json,
+    row.title,
+    row.amount_cents
+  );
+  const totals = invoiceTotals(lineItems, 0);
+  const storedTotal = Number(row.amount_cents) || 0;
+  const subtotalCents = lineItems.length ? totals.subtotalCents : storedTotal;
+  const discountCents = Math.max(
+    0,
+    Math.min(subtotalCents, Number(row.discount_cents) || 0)
+  );
+  const amountCents = Math.max(0, subtotalCents - discountCents);
+  const depositCents =
+    row.deposit_cents != null && row.deposit_cents !== ""
+      ? Math.max(0, Math.min(amountCents, Math.round(Number(row.deposit_cents) || 0)))
+      : null;
   const quote = {
     id: row.id,
     leadId: row.lead_id || null,
@@ -2629,13 +2747,25 @@ function rowToQuote(row, { includeSignature = false } = {}) {
     title: row.title,
     clientName: row.client_name,
     status: row.status,
-    amountCents: Number(row.amount_cents) || 0,
-    notes: row.notes,
+    subtotalCents,
+    discountCents,
+    discountLabel: row.discount_label || "",
+    discountNote: row.discount_note || "",
+    amountCents,
+    depositCents,
+    depositDueCents: quoteDepositDueCents({ amountCents, depositCents }),
+    lineItems,
+    notes: row.notes || "",
+    terms: row.terms || "",
+    addendums: row.addendums || "",
     sentAt: row.sent_at || null,
     ownerEmail: row.owner_email || "",
     documentIds: [],
+    files: [],
     signedAt: row.signed_at || null,
     signedName: row.signed_name || "",
+    clientViewedAt: row.client_viewed_at || null,
+    signToken: row.sign_token || "",
     hasSignature,
     awaitingSignature:
       (row.status === "sent" || row.status === "revisions_requested") && !hasSignature,
@@ -2654,6 +2784,45 @@ function newSignToken() {
   return b64url(bytes);
 }
 
+const PRIVACY_POLICY_DOC = {
+  id: "doc_privacy",
+  slug: "privacy-policy",
+  title: "Privacy Policy",
+  kind: "privacy",
+  summary: "Vanderven Systems Privacy Policy.",
+  bodyPlaceholder: "Attached PDF: Vanderven Systems Privacy Policy.",
+  attachToEveryQuote: 1,
+  sortOrder: 0,
+  filePath: "/public/docs/Vanderven-Systems-Privacy-Policy.pdf",
+  fileName: "Vanderven-Systems-Privacy-Policy.pdf",
+};
+
+const CLIENT_SERVICES_AGREEMENT = {
+  id: "doc_client_services",
+  slug: "client-services-agreement",
+  title: "Client Services Agreement",
+  kind: "agreement",
+  summary: "Vanderven Systems Client Services Agreement.",
+  bodyPlaceholder: "Attached PDF: Vanderven Systems Client Services Agreement.",
+  attachToEveryQuote: 1,
+  sortOrder: 4,
+  filePath: "/public/docs/Vanderven-Systems-Client-Services-Agreement.pdf",
+  fileName: "Vanderven-Systems-Client-Services-Agreement.pdf",
+};
+
+const MUTUAL_NDA_DOC = {
+  id: "doc_mutual_nda",
+  slug: "mutual-nda",
+  title: "Mutual NDA",
+  kind: "nda",
+  summary: "Vanderven Systems Mutual Non-Disclosure Agreement.",
+  bodyPlaceholder: "Attached PDF: Vanderven Systems Mutual NDA.",
+  attachToEveryQuote: 0,
+  sortOrder: 5,
+  filePath: "/public/docs/Vanderven-Systems-Mutual-NDA.pdf",
+  fileName: "Vanderven-Systems-Mutual-NDA.pdf",
+};
+
 function rowToQuoteDocument(row) {
   return {
     id: row.id,
@@ -2665,6 +2834,8 @@ function rowToQuoteDocument(row) {
     attachToEveryQuote: Boolean(Number(row.attach_to_every_quote)),
     active: Boolean(Number(row.active)),
     sortOrder: Number(row.sort_order) || 0,
+    filePath: row.file_path || "",
+    fileName: row.file_name || "",
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -2673,60 +2844,184 @@ function rowToQuoteDocument(row) {
 async function ensureQuoteDocumentsSeeded(env) {
   if (!env.DB) return;
   const count = await env.DB.prepare("SELECT COUNT(*) AS c FROM quote_documents").first();
-  if (count && Number(count.c) > 0) return;
   const ts = nowIso();
-  const docs = [
-    [
-      "doc_privacy",
-      "privacy-policy",
-      "Privacy Policy",
-      "privacy",
-      "How Vanderven Systems handles client information.",
-      "PLACEHOLDER — Replace with your full Privacy Policy.\n\nThis document will be attached to quotes when selected.\nCovers data collected, storage, and client rights.",
-      1,
-      0,
-    ],
-    [
-      "doc_terms",
-      "terms-and-conditions",
-      "Terms & Conditions",
-      "terms",
-      "Standard commercial terms for quoted work.",
-      "PLACEHOLDER — Replace with your Terms & Conditions.\n\nIncludes payment terms, scope changes, timelines, and liability limits.",
-      1,
-      1,
-    ],
-    [
-      "doc_intake",
-      "project-intake-form",
-      "Project Intake Form",
-      "form",
-      "Intake questionnaire for discovery and kickoff.",
-      "PLACEHOLDER — Project Intake Form.\n\n1. Business goals\n2. Current tools\n3. Must-have features\n4. Target launch window\n5. Decision makers",
-      0,
-      2,
-    ],
-    [
-      "doc_warranty",
-      "service-warranty",
-      "Service Warranty Outline",
-      "form",
-      "Warranty / support outline for delivered work.",
-      "PLACEHOLDER — Service Warranty Outline.\n\nDescribe support window, bug-fix coverage, and what is out of scope.",
-      0,
-      3,
-    ],
-  ];
-  const stmt = env.DB.prepare(
-    `INSERT OR IGNORE INTO quote_documents
-      (id, slug, title, kind, summary, body_placeholder, attach_to_every_quote, active, sort_order, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`
-  );
-  await env.DB.batch(
-    docs.map(([id, slug, title, kind, summary, body, every, order]) =>
-      stmt.bind(id, slug, title, kind, summary, body, every, order, ts, ts)
-    )
-  );
+  if (!count || Number(count.c) === 0) {
+    const docs = [
+      [
+        PRIVACY_POLICY_DOC.id,
+        PRIVACY_POLICY_DOC.slug,
+        PRIVACY_POLICY_DOC.title,
+        PRIVACY_POLICY_DOC.kind,
+        PRIVACY_POLICY_DOC.summary,
+        PRIVACY_POLICY_DOC.bodyPlaceholder,
+        PRIVACY_POLICY_DOC.attachToEveryQuote,
+        PRIVACY_POLICY_DOC.sortOrder,
+        PRIVACY_POLICY_DOC.filePath,
+        PRIVACY_POLICY_DOC.fileName,
+      ],
+      [
+        "doc_terms",
+        "terms-and-conditions",
+        "Terms & Conditions",
+        "terms",
+        "Standard commercial terms for quoted work.",
+        "PLACEHOLDER — Replace with your Terms & Conditions.\n\nIncludes payment terms, scope changes, timelines, and liability limits.",
+        1,
+        1,
+        "",
+        "",
+      ],
+      [
+        "doc_intake",
+        "project-intake-form",
+        "Project Intake Form",
+        "form",
+        "Intake questionnaire for discovery and kickoff.",
+        "PLACEHOLDER — Project Intake Form.\n\n1. Business goals\n2. Current tools\n3. Must-have features\n4. Target launch window\n5. Decision makers",
+        0,
+        2,
+        "",
+        "",
+      ],
+      [
+        "doc_warranty",
+        "service-warranty",
+        "Service Warranty Outline",
+        "form",
+        "Warranty / support outline for delivered work.",
+        "PLACEHOLDER — Service Warranty Outline.\n\nDescribe support window, bug-fix coverage, and what is out of scope.",
+        0,
+        3,
+        "",
+        "",
+      ],
+      [
+        CLIENT_SERVICES_AGREEMENT.id,
+        CLIENT_SERVICES_AGREEMENT.slug,
+        CLIENT_SERVICES_AGREEMENT.title,
+        CLIENT_SERVICES_AGREEMENT.kind,
+        CLIENT_SERVICES_AGREEMENT.summary,
+        CLIENT_SERVICES_AGREEMENT.bodyPlaceholder,
+        CLIENT_SERVICES_AGREEMENT.attachToEveryQuote,
+        CLIENT_SERVICES_AGREEMENT.sortOrder,
+        CLIENT_SERVICES_AGREEMENT.filePath,
+        CLIENT_SERVICES_AGREEMENT.fileName,
+      ],
+      [
+        MUTUAL_NDA_DOC.id,
+        MUTUAL_NDA_DOC.slug,
+        MUTUAL_NDA_DOC.title,
+        MUTUAL_NDA_DOC.kind,
+        MUTUAL_NDA_DOC.summary,
+        MUTUAL_NDA_DOC.bodyPlaceholder,
+        MUTUAL_NDA_DOC.attachToEveryQuote,
+        MUTUAL_NDA_DOC.sortOrder,
+        MUTUAL_NDA_DOC.filePath,
+        MUTUAL_NDA_DOC.fileName,
+      ],
+    ];
+    const stmt = env.DB.prepare(
+      `INSERT OR IGNORE INTO quote_documents
+        (id, slug, title, kind, summary, body_placeholder, attach_to_every_quote, active, sort_order, created_at, updated_at, file_path, file_name)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)`
+    );
+    try {
+      await env.DB.batch(
+        docs.map(([id, slug, title, kind, summary, body, every, order, filePath, fileName]) =>
+          stmt.bind(id, slug, title, kind, summary, body, every, order, ts, ts, filePath, fileName)
+        )
+      );
+    } catch {
+      // Older schema without file_* columns — seed without them.
+      const legacy = env.DB.prepare(
+        `INSERT OR IGNORE INTO quote_documents
+          (id, slug, title, kind, summary, body_placeholder, attach_to_every_quote, active, sort_order, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`
+      );
+      await env.DB.batch(
+        docs.map(([id, slug, title, kind, summary, body, every, order]) =>
+          legacy.bind(id, slug, title, kind, summary, body, every, order, ts, ts)
+        )
+      );
+    }
+  }
+  await ensureFileBackedQuoteDocument(env, PRIVACY_POLICY_DOC, ts);
+  await ensureFileBackedQuoteDocument(env, CLIENT_SERVICES_AGREEMENT, ts);
+  await ensureFileBackedQuoteDocument(env, MUTUAL_NDA_DOC, ts);
+}
+
+async function ensureFileBackedQuoteDocument(env, spec, ts = nowIso()) {
+  const existing = await env.DB.prepare("SELECT id, file_path FROM quote_documents WHERE id = ?")
+    .bind(spec.id)
+    .first()
+    .catch(() => null);
+  if (!existing) {
+    try {
+      await env.DB.prepare(
+        `INSERT INTO quote_documents
+          (id, slug, title, kind, summary, body_placeholder, attach_to_every_quote, active, sort_order, created_at, updated_at, file_path, file_name)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)`
+      )
+        .bind(
+          spec.id,
+          spec.slug,
+          spec.title,
+          spec.kind,
+          spec.summary,
+          spec.bodyPlaceholder,
+          spec.attachToEveryQuote,
+          spec.sortOrder,
+          ts,
+          ts,
+          spec.filePath,
+          spec.fileName
+        )
+        .run();
+    } catch {
+      await env.DB.prepare(
+        `INSERT OR IGNORE INTO quote_documents
+          (id, slug, title, kind, summary, body_placeholder, attach_to_every_quote, active, sort_order, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`
+      )
+        .bind(
+          spec.id,
+          spec.slug,
+          spec.title,
+          spec.kind,
+          spec.summary,
+          spec.bodyPlaceholder,
+          spec.attachToEveryQuote,
+          spec.sortOrder,
+          ts,
+          ts
+        )
+        .run();
+    }
+    return;
+  }
+  if (existing.file_path !== spec.filePath) {
+    try {
+      await env.DB.prepare(
+        `UPDATE quote_documents
+         SET title = ?, summary = ?, body_placeholder = ?, attach_to_every_quote = ?, active = 1,
+             file_path = ?, file_name = ?, updated_at = ?
+         WHERE id = ?`
+      )
+        .bind(
+          spec.title,
+          spec.summary,
+          spec.bodyPlaceholder,
+          spec.attachToEveryQuote ? 1 : 0,
+          spec.filePath,
+          spec.fileName,
+          ts,
+          spec.id
+        )
+        .run();
+    } catch {
+      /* columns may not exist until migration */
+    }
+  }
 }
 
 async function listQuoteDocuments(env) {
@@ -2800,91 +3095,476 @@ async function documentsForQuote(env, quote) {
 async function enrichQuote(env, quote) {
   if (!quote) return null;
   const documentIds = await getQuoteDocumentIds(env, quote.id);
-  return { ...quote, documentIds };
+  const files = await listQuoteFiles(env, quote.id);
+  const deposits = await listDepositsForQuote(env, quote.id);
+  return { ...quote, documentIds, files, ...quoteDepositPaymentSummary(deposits) };
 }
 
-function buildQuoteLetterheadHtml(quote, documents = [], { absoluteLogoUrl = "", signUrl = "" } = {}) {
-  const logo = absoluteLogoUrl
-    ? `<img src="${escapeHtmlText(absoluteLogoUrl)}" alt="Vanderven Systems" width="140" style="display:block;max-width:140px;height:auto;" />`
-    : `<div style="font-family:Georgia,serif;font-size:22px;font-weight:700;color:#1c2430;">Vanderven <span style="font-weight:500;color:#8a7340;">Systems</span></div>`;
+const QUOTE_FILE_MAX_BYTES = 12 * 1024 * 1024;
+const QUOTE_FILE_ALLOWED = new Set([
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "text/plain",
+  "text/csv",
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+  "application/zip",
+]);
+
+function guessQuoteFileContentType(fileName = "", declared = "") {
+  const declaredType = cleanText(declared, 120).toLowerCase();
+  if (declaredType && declaredType !== "application/octet-stream") return declaredType;
+  const lower = String(fileName || "").toLowerCase();
+  if (lower.endsWith(".pdf")) return "application/pdf";
+  if (lower.endsWith(".doc")) return "application/msword";
+  if (lower.endsWith(".docx")) {
+    return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  }
+  if (lower.endsWith(".xls")) return "application/vnd.ms-excel";
+  if (lower.endsWith(".xlsx")) {
+    return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+  }
+  if (lower.endsWith(".pptx")) {
+    return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+  }
+  if (lower.endsWith(".txt")) return "text/plain";
+  if (lower.endsWith(".csv")) return "text/csv";
+  if (lower.endsWith(".png")) return "image/png";
+  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+  if (lower.endsWith(".webp")) return "image/webp";
+  if (lower.endsWith(".gif")) return "image/gif";
+  if (lower.endsWith(".zip")) return "application/zip";
+  return declaredType || "application/octet-stream";
+}
+
+function rowToQuoteFile(row) {
+  return {
+    id: row.id,
+    quoteId: row.quote_id,
+    fileName: row.file_name,
+    contentType: row.content_type || "application/octet-stream",
+    byteSize: Number(row.byte_size) || 0,
+    url: `/api/quotes/${encodeURIComponent(row.quote_id)}/files/${encodeURIComponent(row.id)}`,
+    createdAt: row.created_at,
+  };
+}
+
+async function listQuoteFiles(env, quoteId) {
+  try {
+    const result = await env.DB.prepare(
+      "SELECT * FROM quote_files WHERE quote_id = ? ORDER BY created_at ASC"
+    )
+      .bind(quoteId)
+      .all();
+    return (result.results || []).map(rowToQuoteFile);
+  } catch {
+    return [];
+  }
+}
+
+async function listQuoteFilesByQuoteIds(env, quoteIds) {
+  const ids = [...new Set((quoteIds || []).filter(Boolean))];
+  const byQuote = Object.fromEntries(ids.map((id) => [id, []]));
+  if (!ids.length) return byQuote;
+  try {
+    const placeholders = ids.map(() => "?").join(", ");
+    const result = await env.DB.prepare(
+      `SELECT * FROM quote_files WHERE quote_id IN (${placeholders}) ORDER BY created_at ASC`
+    )
+      .bind(...ids)
+      .all();
+    for (const row of result.results || []) {
+      if (!byQuote[row.quote_id]) byQuote[row.quote_id] = [];
+      byQuote[row.quote_id].push(rowToQuoteFile(row));
+    }
+  } catch {
+    /* table may not exist until migration */
+  }
+  return byQuote;
+}
+
+async function getQuoteFileRow(env, quoteId, fileId) {
+  try {
+    return await env.DB.prepare("SELECT * FROM quote_files WHERE id = ? AND quote_id = ?")
+      .bind(fileId, quoteId)
+      .first();
+  } catch {
+    return null;
+  }
+}
+
+async function uploadQuoteFile(env, quoteId, file) {
+  if (!env.CALL_AUDIO) {
+    return { error: "File storage is not configured (R2).", status: 503 };
+  }
+  const quote = await getQuote(env, quoteId);
+  if (!quote) return { error: "Quote not found.", status: 404 };
+  if (!file || typeof file.arrayBuffer !== "function") {
+    return { error: "Choose a file to upload.", status: 400 };
+  }
+  const fileName = cleanText(file.name || "attachment", 180) || "attachment";
+  const contentType = guessQuoteFileContentType(fileName, file.type || "");
+  if (!QUOTE_FILE_ALLOWED.has(contentType)) {
+    return {
+      error: "That file type isn’t supported. Use PDF, Word, Excel, images, text, or zip.",
+      status: 400,
+    };
+  }
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  if (!bytes.length) return { error: "That file is empty.", status: 400 };
+  if (bytes.length > QUOTE_FILE_MAX_BYTES) {
+    return { error: "Files must be 12 MB or smaller.", status: 400 };
+  }
+  const id = newId("qfile");
+  const r2Key = `quote-files/${quoteId}/${id}-${fileName.replace(/[^\w.\-]+/g, "_").slice(0, 80)}`;
+  await env.CALL_AUDIO.put(r2Key, bytes, {
+    httpMetadata: { contentType },
+    customMetadata: { quoteId, fileId: id, fileName },
+  });
+  const ts = nowIso();
+  try {
+    await env.DB.prepare(
+      `INSERT INTO quote_files
+        (id, quote_id, file_name, content_type, byte_size, r2_key, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    )
+      .bind(id, quoteId, fileName, contentType, bytes.length, r2Key, ts)
+      .run();
+  } catch (err) {
+    try {
+      await env.CALL_AUDIO.delete(r2Key);
+    } catch {
+      /* ignore */
+    }
+    return {
+      error: "Could not save file metadata. Apply database migrations and try again.",
+      status: 503,
+    };
+  }
+  const row = await getQuoteFileRow(env, quoteId, id);
+  return { file: rowToQuoteFile(row) };
+}
+
+async function deleteQuoteFile(env, quoteId, fileId) {
+  const row = await getQuoteFileRow(env, quoteId, fileId);
+  if (!row) return { error: "File not found.", status: 404 };
+  if (env.CALL_AUDIO && row.r2_key) {
+    try {
+      await env.CALL_AUDIO.delete(row.r2_key);
+    } catch {
+      /* continue — still remove DB row */
+    }
+  }
+  await env.DB.prepare("DELETE FROM quote_files WHERE id = ? AND quote_id = ?")
+    .bind(fileId, quoteId)
+    .run();
+  return { ok: true };
+}
+
+async function quoteFileAttachmentPayload(env, fileRow) {
+  if (!env.CALL_AUDIO || !fileRow?.r2_key) return null;
+  try {
+    const object = await env.CALL_AUDIO.get(fileRow.r2_key);
+    if (!object) return null;
+    const buf = await object.arrayBuffer();
+    if (!buf.byteLength) return null;
+    return {
+      filename: fileRow.file_name || "attachment",
+      content: toBase64Bytes(buf),
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function deleteQuoteFilesForQuote(env, quoteId) {
+  try {
+    const result = await env.DB.prepare("SELECT r2_key FROM quote_files WHERE quote_id = ?")
+      .bind(quoteId)
+      .all();
+    if (env.CALL_AUDIO) {
+      await Promise.all(
+        (result.results || []).map(async (row) => {
+          if (!row.r2_key) return;
+          try {
+            await env.CALL_AUDIO.delete(row.r2_key);
+          } catch {
+            /* ignore */
+          }
+        })
+      );
+    }
+    await env.DB.prepare("DELETE FROM quote_files WHERE quote_id = ?").bind(quoteId).run();
+  } catch {
+    /* ignore */
+  }
+}
+
+function formatQuoteLineItemsHtml(lineItems) {
+  const rows = (lineItems || [])
+    .map((item) => {
+      const lineTotal = Math.round(Number(item.qty) * Number(item.unitCents));
+      return `<tr>
+        <td style="padding:10px 8px;border-bottom:1px solid #e6e1d6;font-size:13px;color:#1c2430;">${escapeHtmlText(item.description)}</td>
+        <td style="padding:10px 8px;border-bottom:1px solid #e6e1d6;font-size:13px;text-align:right;white-space:nowrap;color:#3a424c;">${escapeHtmlText(String(item.qty))}</td>
+        <td style="padding:10px 8px;border-bottom:1px solid #e6e1d6;font-size:13px;text-align:right;white-space:nowrap;color:#3a424c;">${escapeHtmlText(formatCadCents(item.unitCents))}</td>
+        <td style="padding:10px 8px;border-bottom:1px solid #e6e1d6;font-size:13px;text-align:right;white-space:nowrap;font-weight:600;color:#1c2430;">${escapeHtmlText(formatCadCents(lineTotal))}</td>
+      </tr>`;
+    })
+    .join("");
+  if (!rows) return "";
+  return `<table width="100%" cellpadding="0" cellspacing="0" style="margin-top:20px;border-collapse:collapse;">
+    <thead>
+      <tr>
+        <th align="left" style="background:#f4efe4;padding:9px 8px;font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:#5c6570;">Item</th>
+        <th align="right" style="background:#f4efe4;padding:9px 8px;font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:#5c6570;">Qty</th>
+        <th align="right" style="background:#f4efe4;padding:9px 8px;font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:#5c6570;">Rate</th>
+        <th align="right" style="background:#f4efe4;padding:9px 8px;font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:#5c6570;">Amount</th>
+      </tr>
+    </thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+
+function formatQuotePricingHtml(quote) {
+  const subtotal = Number(quote.subtotalCents) || Number(quote.amountCents) || 0;
+  const discount = Math.max(0, Math.min(subtotal, Number(quote.discountCents) || 0));
+  const total = Math.max(0, subtotal - discount);
+  const discountLabel = quote.discountLabel || "Discount";
+  const listPriceRow = discount
+    ? `<tr>
+        <td style="padding:6px 0;font-size:13px;color:#3a424c;">What this costs</td>
+        <td align="right" style="padding:6px 0;font-size:13px;color:#3a424c;text-decoration:line-through;white-space:nowrap;">${escapeHtmlText(formatCadCents(subtotal))}</td>
+      </tr>`
+    : "";
+  const discountRow = discount
+    ? `<tr>
+        <td style="padding:6px 0;font-size:13px;color:#3a424c;">${escapeHtmlText(discountLabel)}</td>
+        <td align="right" style="padding:6px 0;font-size:13px;color:#6b5a2e;white-space:nowrap;">−${escapeHtmlText(formatCadCents(discount))}</td>
+      </tr>`
+    : "";
+  const note = quote.discountNote
+    ? `<p style="margin:8px 0 0;font-size:12px;line-height:1.45;color:#5c6570;white-space:pre-wrap;">${escapeHtmlText(quote.discountNote)}</p>`
+    : "";
+  return `<div style="margin-top:18px;padding:16px 18px;background:#f7f2e8;border-radius:10px;">
+    <table width="100%" cellpadding="0" cellspacing="0">
+      ${listPriceRow}
+      ${discountRow}
+    </table>
+    ${note}
+    <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:${note || discount ? "8" : "0"}px;">
+      <tr>
+        <td style="padding:10px 0 0;font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:#8a7340;font-weight:700;${discount ? "border-top:1px solid #e0d6c4;" : ""}">Investment total</td>
+        <td align="right" style="padding:6px 0 0;font-size:24px;font-weight:700;color:#1c2430;white-space:nowrap;${discount ? "border-top:1px solid #e0d6c4;" : ""}">${escapeHtmlText(formatCadCents(total))} <span style="font-size:13px;font-weight:500;color:#5c6570;">CAD</span></td>
+      </tr>
+    </table>
+  </div>`;
+}
+
+/** Solid navy — email clients often strip CSS gradients and leave light text on white. */
+const EMAIL_BRAND_BG = "#1f3a5f";
+const EMAIL_BRAND_FG = "#f4f7fb";
+const EMAIL_BRAND_MUTED = "#c5d4e8";
+
+function emailBrandHeaderHtml({
+  logoUrl = "",
+  kicker = "Quote",
+  number = "",
+  detailHtml = "",
+}) {
+  const logoCell = logoUrl
+    ? `<td style="vertical-align:middle;padding:0 12px 0 0;width:64px;">
+        <img src="${escapeHtmlText(logoUrl)}" alt="Vanderven Systems" width="56" height="56" style="display:block;width:56px;max-width:56px;height:auto;border:0;outline:none;text-decoration:none;" />
+      </td>`
+    : "";
+  return `
+    <table width="100%" cellpadding="0" cellspacing="0" role="presentation" bgcolor="${EMAIL_BRAND_BG}" style="background-color:${EMAIL_BRAND_BG};background:${EMAIL_BRAND_BG};">
+      <tr>
+        <td bgcolor="${EMAIL_BRAND_BG}" style="padding:22px 24px;background-color:${EMAIL_BRAND_BG};background:${EMAIL_BRAND_BG};">
+          <table width="100%" cellpadding="0" cellspacing="0" role="presentation">
+            <tr>
+              <td valign="top" style="vertical-align:top;padding:0 12px 12px 0;">
+                <table cellpadding="0" cellspacing="0" role="presentation"><tr>
+                  ${logoCell}
+                  <td style="vertical-align:middle;">
+                    <div style="font-family:Georgia,Times,serif;font-size:20px;font-weight:700;line-height:1.2;color:${EMAIL_BRAND_FG};mso-line-height-rule:exactly;">
+                      Vanderven <span style="font-weight:500;color:#e0c070;">Systems</span>
+                    </div>
+                  </td>
+                </tr></table>
+                <p style="margin:10px 0 0;font-family:Segoe UI,Helvetica,Arial,sans-serif;font-size:12px;line-height:1.45;color:${EMAIL_BRAND_MUTED};">
+                  ${escapeHtmlText(COMPANY.tagline)}<br/>
+                  ${escapeHtmlText(COMPANY.location)} · ${escapeHtmlText(COMPANY.email)}
+                </p>
+              </td>
+              <td valign="top" width="42%" style="vertical-align:top;text-align:right;padding:0 0 12px 8px;">
+                <div style="font-family:Segoe UI,Helvetica,Arial,sans-serif;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:${EMAIL_BRAND_MUTED};">${escapeHtmlText(kicker)}</div>
+                <div style="font-family:Segoe UI,Helvetica,Arial,sans-serif;font-size:24px;font-weight:700;margin-top:4px;line-height:1.2;color:${EMAIL_BRAND_FG};">${escapeHtmlText(number)}</div>
+                ${
+                  detailHtml
+                    ? `<div style="margin-top:10px;font-family:Segoe UI,Helvetica,Arial,sans-serif;font-size:12px;line-height:1.5;color:${EMAIL_BRAND_MUTED};">${detailHtml}</div>`
+                    : ""
+                }
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>`;
+}
+
+async function logoInlineAttachment(env) {
+  const file = await loadQuoteDocumentFile(
+    env,
+    {
+      filePath: "/public/logo-mark-nav-transparent.png",
+      fileName: "vanderven-logo.png",
+    },
+    ""
+  );
+  if (!file?.content) return null;
+  return {
+    filename: "vanderven-logo.png",
+    content: file.content,
+    contentId: "vds-logo",
+  };
+}
+
+function buildQuoteLetterheadHtml(
+  quote,
+  documents = [],
+  { absoluteLogoUrl = "", signUrl = "", payUrl = "" } = {}
+) {
   const attachments = (documents || [])
     .map(
       (doc) =>
-        `<li style="margin:0 0 6px;font-size:13px;color:#1c2430;"><strong>${escapeHtmlText(
+        `<li style="margin:0 0 6px;font-size:13px;color:#1c2430;word-break:break-word;"><strong>${escapeHtmlText(
           doc.title
         )}</strong> — ${escapeHtmlText(doc.summary || doc.kind)}</li>`
     )
     .join("");
+  const termsBlock = quote.terms
+    ? `<div style="margin-top:22px;">
+        <div style="font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:#8a7340;font-weight:700;">Terms &amp; conditions</div>
+        <p style="margin:8px 0 0;font-size:13px;line-height:1.55;color:#3a424c;white-space:pre-wrap;word-break:break-word;">${escapeHtmlText(quote.terms)}</p>
+      </div>`
+    : "";
+  const addendumBlock = quote.addendums
+    ? `<div style="margin-top:22px;">
+        <div style="font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:#8a7340;font-weight:700;">Addendums</div>
+        <p style="margin:8px 0 0;font-size:13px;line-height:1.55;color:#3a424c;white-space:pre-wrap;word-break:break-word;">${escapeHtmlText(quote.addendums)}</p>
+      </div>`
+    : "";
+  const header = emailBrandHeaderHtml({
+    logoUrl: absoluteLogoUrl,
+    kicker: "Quote",
+    number: quote.number,
+    detailHtml: `Prepared for ${escapeHtmlText(quote.clientName || "Client")}<br/>${escapeHtmlText(formatCadCents(quote.amountCents))}`,
+  });
   return `<!DOCTYPE html>
-<html><head><meta charset="utf-8" /><title>Quote ${escapeHtmlText(quote.number)}</title></head>
-<body style="margin:0;padding:0;background:#f3f0ea;color:#1c2430;">
-  <div style="max-width:720px;margin:0 auto;padding:28px 20px;font-family:Segoe UI,Helvetica,Arial,sans-serif;">
-    <div style="background:#fffaf3;border:1px solid #ddd4c4;border-radius:14px;overflow:hidden;">
-      <div style="padding:28px 32px 22px;background:linear-gradient(135deg,#1c2430 0%,#2d3a4a 55%,#3d3424 100%);color:#f7f1e6;">
-        <table width="100%" cellpadding="0" cellspacing="0"><tr>
-          <td style="vertical-align:top;">${logo}
-            <p style="margin:10px 0 0;font-size:12px;opacity:0.85;line-height:1.45;">${escapeHtmlText(COMPANY.tagline)}<br/>${escapeHtmlText(COMPANY.location)} · ${escapeHtmlText(COMPANY.email)}</p>
-          </td>
-          <td style="vertical-align:top;text-align:right;">
-            <div style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;opacity:0.75;">Quote</div>
-            <div style="font-size:26px;font-weight:700;margin-top:4px;">${escapeHtmlText(quote.number)}</div>
-            <div style="margin-top:10px;font-size:12px;line-height:1.5;opacity:0.9;">
-              Prepared for ${escapeHtmlText(quote.clientName || "Client")}<br/>
-              ${escapeHtmlText(formatCadCents(quote.amountCents))}
-            </div>
-          </td>
-        </tr></table>
-      </div>
-      <div style="padding:28px 32px;">
-        <div style="font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:#8a7340;font-weight:700;">Proposal</div>
-        <h1 style="margin:8px 0 0;font-size:22px;line-height:1.3;">${escapeHtmlText(quote.title)}</h1>
-        <p style="margin:14px 0 0;font-size:14px;line-height:1.55;color:#3a424c;">
-          ${escapeHtmlText(quote.notes || "Scope and deliverables as discussed.")}
-        </p>
-        <div style="margin-top:22px;padding:16px 18px;background:#f7f2e8;border-radius:10px;">
-          <div style="font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:#8a7340;font-weight:700;">Investment</div>
-          <div style="margin-top:6px;font-size:24px;font-weight:700;">${escapeHtmlText(formatCadCents(quote.amountCents))}</div>
-          <div style="margin-top:4px;font-size:12px;color:#5c6570;">CAD · subject to final scope confirmation</div>
-        </div>
-        ${
-          attachments
-            ? `<div style="margin-top:24px;">
-                <div style="font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:#8a7340;font-weight:700;">Attached with this quote</div>
-                <ul style="margin:10px 0 0;padding-left:18px;">${attachments}</ul>
-                <p style="margin:10px 0 0;font-size:12px;color:#5c6570;">Placeholder documents are attached until your final PDFs are uploaded.</p>
-              </div>`
-            : ""
-        }
-        ${
-          signUrl
-            ? `<div style="margin-top:28px;text-align:center;">
-                <a href="${escapeHtmlText(signUrl)}" style="display:inline-block;padding:14px 22px;background:#b8953e;color:#141820;text-decoration:none;font-weight:700;font-size:14px;border-radius:10px;">Review &amp; sign to approve</a>
-                <p style="margin:12px 0 0;font-size:12px;color:#5c6570;line-height:1.5;">This quote needs your signature before we start.</p>
-              </div>`
-            : ""
-        }
-        <div style="margin-top:28px;padding-top:16px;border-top:1px solid #e6e1d6;font-size:12px;color:#5c6570;line-height:1.55;">
-          Questions? Reply to this email or write <strong style="color:#1c2430;">${escapeHtmlText(COMPANY.email)}</strong>.<br/>
-          — ${escapeHtmlText(COMPANY.name)} · ${escapeHtmlText(COMPANY.web)}
-        </div>
-      </div>
-    </div>
+<html><head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Quote ${escapeHtmlText(quote.number)}</title>
+</head>
+<body style="margin:0;padding:0;background:#eef1f5;color:#1c2430;">
+  <div style="max-width:640px;margin:0 auto;padding:16px 12px;font-family:Segoe UI,Helvetica,Arial,sans-serif;">
+    <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="background:#ffffff;border:1px solid #d7dde6;border-radius:12px;overflow:hidden;">
+      <tr><td>${header}</td></tr>
+      <tr>
+        <td style="padding:24px 20px;">
+          <div style="font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:#8a7340;font-weight:700;">Proposal</div>
+          <h1 style="margin:8px 0 0;font-size:20px;line-height:1.3;color:#1c2430;word-break:break-word;">${escapeHtmlText(quote.title)}</h1>
+          <p style="margin:14px 0 0;font-size:14px;line-height:1.55;color:#3a424c;white-space:pre-wrap;word-break:break-word;">
+            ${escapeHtmlText(quote.notes || "Scope and deliverables as discussed.")}
+          </p>
+          ${formatQuoteLineItemsHtml(quote.lineItems)}
+          ${formatQuotePricingHtml(quote)}
+          ${termsBlock}
+          ${addendumBlock}
+          ${
+            attachments
+              ? `<div style="margin-top:24px;">
+                  <div style="font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:#8a7340;font-weight:700;">Attached with this quote</div>
+                  <ul style="margin:10px 0 0;padding-left:18px;">${attachments}</ul>
+                  <p style="margin:10px 0 0;font-size:12px;color:#5c6570;">Supporting documents attached with this quote.</p>
+                </div>`
+              : ""
+          }
+          ${
+            signUrl
+              ? `<div style="margin-top:28px;">
+                  <a href="${escapeHtmlText(signUrl)}" style="display:block;width:100%;box-sizing:border-box;padding:14px 16px;background:#b8953e;color:#141820;text-decoration:none;font-weight:700;font-size:15px;border-radius:10px;text-align:center;">Review &amp; sign to approve</a>
+                  <p style="margin:12px 0 0;font-size:12px;color:#5c6570;line-height:1.5;text-align:center;">Please sign first — then you can pay the kickoff deposit.</p>
+                </div>`
+              : ""
+          }
+          ${paymentInstructionsBlock({
+            baseCents: quoteDepositDueCents(quote),
+            payUrl: "",
+            number: quote.number,
+            heading: "After you sign — deposit due to begin",
+            blurb: "Sign above first. Then pay your kickoff deposit (balance is invoiced later). Card payments include 3.5% processing.",
+            etransferTitle: "Pay deposit via e-Transfer",
+            cardTitle: "Pay deposit by card",
+            buttonLabel: "Pay deposit by card",
+          }).html}
+          <div style="margin-top:28px;padding-top:16px;border-top:1px solid #e6e1d6;font-size:12px;color:#5c6570;line-height:1.55;">
+            Questions? Reply to this email or write <strong style="color:#1c2430;">${escapeHtmlText(COMPANY.email)}</strong>.<br/>
+            — ${escapeHtmlText(COMPANY.name)} · ${escapeHtmlText(COMPANY.web)}
+          </div>
+        </td>
+      </tr>
+    </table>
   </div>
 </body></html>`;
 }
 
-function buildQuotePlainText(quote, documents = [], { signUrl = "" } = {}) {
+function buildQuotePlainText(quote, documents = [], { signUrl = "", payUrl = "" } = {}) {
   const docs = (documents || []).map((d) => `- ${d.title}: ${d.summary || d.kind}`).join("\n");
+  const lines = (quote.lineItems || [])
+    .map((item) => {
+      const total = Math.round(Number(item.qty) * Number(item.unitCents));
+      return `- ${item.description} · qty ${item.qty} · ${formatCadCents(item.unitCents)} = ${formatCadCents(total)}`;
+    })
+    .join("\n");
+  const subtotal = Number(quote.subtotalCents) || Number(quote.amountCents) || 0;
+  const discount = Math.max(0, Math.min(subtotal, Number(quote.discountCents) || 0));
   return [
     `${COMPANY.name} — Quote ${quote.number}`,
     quote.title,
     "",
     `Prepared for: ${quote.clientName || "Client"}`,
-    `Investment: ${formatCadCents(quote.amountCents)} CAD`,
+    discount ? `What this costs: ${formatCadCents(subtotal)} CAD` : "",
+    discount ? `${quote.discountLabel || "Discount"}: −${formatCadCents(discount)} CAD` : "",
+    quote.discountNote ? `Note: ${quote.discountNote}` : "",
+    `Investment total: ${formatCadCents(quote.amountCents)} CAD`,
+    `Deposit due to begin: ${formatCadCents(quoteDepositDueCents(quote))} CAD`,
     "",
     quote.notes || "Scope and deliverables as discussed.",
+    lines ? `\nLine items:\n${lines}` : "",
+    quote.terms ? `\nTerms & conditions:\n${quote.terms}` : "",
+    quote.addendums ? `\nAddendums:\n${quote.addendums}` : "",
     docs ? `\nAttached:\n${docs}` : "",
-    signUrl ? `\nReview & sign to approve:\n${signUrl}\n\nThis quote needs your signature before we start.` : "",
+    signUrl
+      ? `\nReview & sign to approve:\n${signUrl}\n\nPlease sign first — then you can pay the kickoff deposit.`
+      : "",
+    `\n${paymentInstructionsBlock({
+      baseCents: quoteDepositDueCents(quote),
+      payUrl: "",
+      number: quote.number,
+      heading: "After you sign — deposit due to begin",
+      blurb: "Sign above first. Then pay your kickoff deposit (balance is invoiced later). Card payments include 3.5% processing.",
+      etransferTitle: "Pay deposit via e-Transfer",
+      cardTitle: "Pay deposit by card",
+      buttonLabel: "Pay deposit by card",
+    }).text}`,
     "",
     `— ${COMPANY.name} · ${COMPANY.email}`,
   ]
@@ -2892,7 +3572,57 @@ function buildQuotePlainText(quote, documents = [], { signUrl = "" } = {}) {
     .join("\n");
 }
 
-function documentAttachmentPayload(doc) {
+function toBase64Bytes(bytes) {
+  let binary = "";
+  const view = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  for (let i = 0; i < view.length; i += 1) binary += String.fromCharCode(view[i]);
+  return btoa(binary);
+}
+
+async function loadQuoteDocumentFile(env, doc, requestUrl = "") {
+  const filePath = cleanText(doc.filePath || doc.file_path, 240);
+  if (!filePath) return null;
+  const filename =
+    cleanText(doc.fileName || doc.file_name, 180) ||
+    filePath.split("/").filter(Boolean).pop() ||
+    "attachment.pdf";
+  try {
+    if (env.ASSETS) {
+      const assetReq = new Request(new URL(filePath, "https://assets.local").toString());
+      const res = await env.ASSETS.fetch(assetReq);
+      if (res.ok) {
+        const buf = await res.arrayBuffer();
+        if (buf.byteLength) {
+          return { filename, content: toBase64Bytes(buf) };
+        }
+      }
+    }
+    const origin = requestUrl ? new URL(requestUrl).origin : "";
+    if (origin) {
+      const res = await fetch(new URL(filePath, origin).toString());
+      if (res.ok) {
+        const buf = await res.arrayBuffer();
+        if (buf.byteLength) {
+          return { filename, content: toBase64Bytes(buf) };
+        }
+      }
+    }
+  } catch {
+    /* fall through to text placeholder */
+  }
+  return null;
+}
+
+async function documentAttachmentPayload(env, doc, requestUrl = "") {
+  const file = await loadQuoteDocumentFile(env, doc, requestUrl);
+  if (file) return file;
+  const expectedPath = cleanText(doc.filePath || doc.file_path, 240);
+  if (expectedPath) {
+    return {
+      error: `Could not load attachment “${doc.title || doc.fileName || expectedPath}”.`,
+      status: 502,
+    };
+  }
   const body = [
     doc.title,
     "",
@@ -3296,10 +4026,17 @@ async function deliverReminder(env, { toEmail, subject, body, html, attachments,
     if (replyAddress) payload.reply_to = replyAddress;
     if (html) payload.html = html;
     if (Array.isArray(attachments) && attachments.length) {
-      payload.attachments = attachments.map((file) => ({
-        filename: file.filename,
-        content: file.content,
-      }));
+      payload.attachments = attachments.map((file) => {
+        const item = {
+          filename: file.filename,
+          content: file.content,
+        };
+        if (file.contentId) {
+          item.content_id = file.contentId;
+          item.content_disposition = "inline";
+        }
+        return item;
+      });
     }
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
@@ -3430,10 +4167,1193 @@ async function processQuoteReminders(env) {
 const COMPANY = {
   name: "Vanderven Systems",
   email: "hello@vanderven.ca",
+  accountingEmail: "accounting@vanderven.ca",
   location: "Kelowna & Central Okanagan, BC",
   web: "vanderven.ca",
   tagline: "Websites, automation & systems for local businesses",
 };
+
+const CARD_FEE_RATE = 0.035;
+/** Default deposit asked on quotes (balance billed later on invoice). */
+const QUOTE_DEPOSIT_RATE = 0.5;
+
+function cardFeeCents(baseCents) {
+  const base = Math.max(0, Math.round(Number(baseCents) || 0));
+  return Math.round(base * CARD_FEE_RATE);
+}
+
+function cardTotalCents(baseCents) {
+  const base = Math.max(0, Math.round(Number(baseCents) || 0));
+  return base + cardFeeCents(base);
+}
+
+/** Deposit due now for a quote — custom deposit_cents, else 50% of investment total. */
+function quoteDepositDueCents(quote) {
+  const amount = Math.max(
+    0,
+    Math.round(Number(quote?.amountCents ?? quote?.amount_cents) || 0)
+  );
+  const raw = quote?.depositCents ?? quote?.deposit_cents;
+  if (raw !== undefined && raw !== null && String(raw).trim() !== "") {
+    const custom = Math.round(Number(raw));
+    if (Number.isFinite(custom)) return Math.max(0, Math.min(amount, custom));
+  }
+  return Math.max(0, Math.round(amount * QUOTE_DEPOSIT_RATE));
+}
+
+function resolveQuoteDepositCents(body, amountCents, existing = null) {
+  const amount = Math.max(0, Math.round(Number(amountCents) || 0));
+  if (
+    body &&
+    (body.depositCents !== undefined ||
+      body.deposit_cents !== undefined ||
+      body.deposit !== undefined)
+  ) {
+    const raw = body.depositCents ?? body.deposit_cents ?? body.deposit;
+    if (raw === null || raw === "") {
+      return Math.round(amount * QUOTE_DEPOSIT_RATE);
+    }
+    const cents = moneyToCents(raw, {
+      alreadyCents: body.depositCents !== undefined || body.deposit_cents !== undefined,
+    });
+    return Math.max(0, Math.min(amount, cents));
+  }
+  if (existing && existing.deposit_cents != null && existing.deposit_cents !== "") {
+    return Math.max(0, Math.min(amount, Math.round(Number(existing.deposit_cents) || 0)));
+  }
+  return Math.round(amount * QUOTE_DEPOSIT_RATE);
+}
+
+function normalizeDepositMethod(value) {
+  const m = String(value || "").toLowerCase().trim();
+  return ["card", "etransfer", "manual"].includes(m) ? m : null;
+}
+
+function normalizeDepositStatus(value) {
+  const s = String(value || "").toLowerCase().trim();
+  return ["pending", "received", "applied", "void"].includes(s) ? s : null;
+}
+
+function rowToDeposit(row) {
+  return {
+    id: row.id,
+    leadId: row.lead_id,
+    quoteId: row.quote_id || null,
+    invoiceId: row.invoice_id || null,
+    amountCents: Number(row.amount_cents) || 0,
+    feeCents: Number(row.fee_cents) || 0,
+    method: row.method || "manual",
+    status: row.status || "pending",
+    stripeSessionId: row.stripe_session_id || "",
+    stripePaymentIntent: row.stripe_payment_intent || "",
+    note: row.note || "",
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+async function listDepositsForLead(env, leadId) {
+  try {
+    const result = await env.DB.prepare(
+      "SELECT * FROM client_deposits WHERE lead_id = ? ORDER BY created_at DESC"
+    )
+      .bind(leadId)
+      .all();
+    return (result.results || []).map(rowToDeposit);
+  } catch {
+    return [];
+  }
+}
+
+async function availableDepositCents(env, leadId) {
+  try {
+    const row = await env.DB.prepare(
+      `SELECT COALESCE(SUM(amount_cents), 0) AS total
+       FROM client_deposits
+       WHERE lead_id = ? AND status = 'received'`
+    )
+      .bind(leadId)
+      .first();
+    return Math.max(0, Number(row?.total) || 0);
+  } catch {
+    return 0;
+  }
+}
+
+async function listDepositsForQuote(env, quoteId) {
+  if (!quoteId) return [];
+  try {
+    const result = await env.DB.prepare(
+      `SELECT * FROM client_deposits
+       WHERE quote_id = ? AND status IN ('received', 'applied')
+       ORDER BY created_at ASC`
+    )
+      .bind(quoteId)
+      .all();
+    return (result.results || []).map(rowToDeposit);
+  } catch {
+    return [];
+  }
+}
+
+async function listDepositSummariesByQuoteIds(env, quoteIds = []) {
+  const ids = [...new Set((quoteIds || []).filter(Boolean))];
+  const map = {};
+  for (const id of ids) map[id] = [];
+  if (!ids.length) return map;
+  try {
+    const placeholders = ids.map(() => "?").join(",");
+    const result = await env.DB.prepare(
+      `SELECT * FROM client_deposits
+       WHERE quote_id IN (${placeholders}) AND status IN ('received', 'applied')
+       ORDER BY created_at ASC`
+    )
+      .bind(...ids)
+      .all();
+    for (const row of result.results || []) {
+      const dep = rowToDeposit(row);
+      if (!map[dep.quoteId]) map[dep.quoteId] = [];
+      map[dep.quoteId].push(dep);
+    }
+  } catch {
+    /* ignore */
+  }
+  return map;
+}
+
+function quoteDepositPaymentSummary(deposits = []) {
+  const paid = (deposits || []).filter((d) => d.status === "received" || d.status === "applied");
+  const depositPaidCents = paid.reduce((sum, d) => sum + (Number(d.amountCents) || 0), 0);
+  const depositFeeCents = paid.reduce((sum, d) => sum + (Number(d.feeCents) || 0), 0);
+  const latest = paid.length ? paid[paid.length - 1] : null;
+  const first = paid.length ? paid[0] : null;
+  return {
+    deposits: paid,
+    depositPaidCents,
+    depositFeeCents,
+    depositPaidAt: first?.createdAt || null,
+    depositPaidLatestAt: latest?.createdAt || null,
+    depositPaidMethod: latest?.method || "",
+    alreadyPaid: depositPaidCents > 0,
+  };
+}
+
+async function quoteHasActiveDeposit(env, quoteId) {
+  if (!quoteId) return false;
+  try {
+    const row = await env.DB.prepare(
+      `SELECT id FROM client_deposits
+       WHERE quote_id = ? AND status IN ('received', 'applied')
+       LIMIT 1`
+    )
+      .bind(quoteId)
+      .first();
+    return Boolean(row?.id);
+  } catch {
+    return false;
+  }
+}
+
+async function appliedDepositCentsForInvoice(env, invoiceId) {
+  if (!invoiceId) return 0;
+  try {
+    const row = await env.DB.prepare(
+      `SELECT COALESCE(SUM(amount_cents), 0) AS total
+       FROM client_deposits
+       WHERE invoice_id = ? AND status = 'applied'`
+    )
+      .bind(invoiceId)
+      .first();
+    return Math.max(0, Number(row?.total) || 0);
+  } catch {
+    return 0;
+  }
+}
+
+/** FIFO share of unapplied deposit credit allocated to this open invoice (+ already applied). */
+async function allocatedDepositCentsForInvoice(env, invoice) {
+  if (!invoice?.leadId || !invoice?.id) return 0;
+  const alreadyApplied = await appliedDepositCentsForInvoice(env, invoice.id);
+  if (invoice.status === "paid") return alreadyApplied;
+
+  const amount = Math.max(0, invoice.amountCents || 0);
+  const room = Math.max(0, amount - alreadyApplied);
+  if (room <= 0) return alreadyApplied;
+
+  const available = await availableDepositCents(env, invoice.leadId);
+  if (available <= 0) return alreadyApplied;
+
+  let open;
+  try {
+    open = await env.DB.prepare(
+      `SELECT i.id, i.amount_cents,
+         COALESCE((
+           SELECT SUM(d.amount_cents) FROM client_deposits d
+           WHERE d.invoice_id = i.id AND d.status = 'applied'
+         ), 0) AS applied_cents
+       FROM invoices i
+       WHERE i.lead_id = ? AND i.status IN ('draft', 'sent', 'overdue')
+       ORDER BY COALESCE(i.issue_date, i.created_at) ASC, i.created_at ASC, i.id ASC`
+    )
+      .bind(invoice.leadId)
+      .all();
+  } catch {
+    return alreadyApplied + Math.min(available, room);
+  }
+  let remaining = available;
+  for (const row of open.results || []) {
+    const amt = Math.max(0, Number(row.amount_cents) || 0);
+    const applied = Math.max(0, Number(row.applied_cents) || 0);
+    const need = Math.max(0, amt - applied);
+    const take = Math.min(remaining, need);
+    if (row.id === invoice.id) return alreadyApplied + take;
+    remaining -= take;
+  }
+  return alreadyApplied;
+}
+
+/**
+ * Apply received deposits to an invoice up to maxCents (FIFO).
+ * Splits a deposit when only part of it is needed so leftover credit stays available.
+ */
+async function applyReceivedDepositsToInvoice(env, leadId, invoiceId, maxCents) {
+  const need = Math.max(0, Math.round(Number(maxCents) || 0));
+  if (!leadId || !invoiceId || need <= 0) return 0;
+  const ts = nowIso();
+  let rows;
+  try {
+    rows = await env.DB.prepare(
+      `SELECT * FROM client_deposits
+       WHERE lead_id = ? AND status = 'received'
+       ORDER BY created_at ASC, id ASC`
+    )
+      .bind(leadId)
+      .all();
+  } catch {
+    return 0;
+  }
+  let remaining = need;
+  let appliedTotal = 0;
+  for (const row of rows.results || []) {
+    if (remaining <= 0) break;
+    const amount = Math.max(0, Number(row.amount_cents) || 0);
+    if (amount <= 0) continue;
+    if (amount <= remaining) {
+      await env.DB.prepare(
+        `UPDATE client_deposits
+         SET status = 'applied', invoice_id = ?, updated_at = ?
+         WHERE id = ?`
+      )
+        .bind(invoiceId, ts, row.id)
+        .run();
+      remaining -= amount;
+      appliedTotal += amount;
+      continue;
+    }
+    const applyAmount = remaining;
+    const leftover = amount - applyAmount;
+    const feeOriginal = Math.max(0, Number(row.fee_cents) || 0);
+    const feeApplied = amount > 0 ? Math.round((feeOriginal * applyAmount) / amount) : 0;
+    const feeLeft = Math.max(0, feeOriginal - feeApplied);
+    await env.DB.prepare(
+      `UPDATE client_deposits
+       SET amount_cents = ?, fee_cents = ?, status = 'applied', invoice_id = ?, updated_at = ?
+       WHERE id = ?`
+    )
+      .bind(applyAmount, feeApplied, invoiceId, ts, row.id)
+      .run();
+    await insertDeposit(env, {
+      leadId,
+      quoteId: row.quote_id || null,
+      amountCents: leftover,
+      feeCents: feeLeft,
+      method: row.method || "manual",
+      status: "received",
+      note: cleanText(`Remainder after applying $${(applyAmount / 100).toFixed(2)} to invoice. ${row.note || ""}`, 2000),
+    });
+    appliedTotal += applyAmount;
+    remaining = 0;
+  }
+  return appliedTotal;
+}
+
+async function issueEntityPayToken(env, table, id) {
+  try {
+    const existing = await env.DB.prepare(`SELECT pay_token FROM ${table} WHERE id = ?`)
+      .bind(id)
+      .first();
+    if (existing?.pay_token) return existing.pay_token;
+    const token = newSignToken();
+    const ts = nowIso();
+    await env.DB.prepare(
+      `UPDATE ${table} SET pay_token = ?, pay_token_created_at = ?, updated_at = ? WHERE id = ?`
+    )
+      .bind(token, ts, ts, id)
+      .run();
+    return token;
+  } catch {
+    return null;
+  }
+}
+
+async function getQuoteByPayToken(env, token) {
+  const clean = cleanText(token, 80);
+  if (!clean) return null;
+  try {
+    return await env.DB.prepare("SELECT * FROM quotes WHERE pay_token = ?").bind(clean).first();
+  } catch {
+    return null;
+  }
+}
+
+async function getInvoiceByPayToken(env, token) {
+  const clean = cleanText(token, 80);
+  if (!clean) return null;
+  try {
+    return await env.DB.prepare("SELECT * FROM invoices WHERE pay_token = ?").bind(clean).first();
+  } catch {
+    return null;
+  }
+}
+
+async function enrichInvoicePayments(env, invoice) {
+  if (!invoice) return null;
+  const depositAvailableCents = await allocatedDepositCentsForInvoice(env, invoice);
+  const balanceDueCents =
+    invoice.status === "paid"
+      ? 0
+      : Math.max(0, (invoice.amountCents || 0) - depositAvailableCents);
+  return {
+    ...invoice,
+    depositAvailableCents,
+    balanceDueCents,
+    cardTotalCents: cardTotalCents(balanceDueCents),
+    cardFeeCents: cardFeeCents(balanceDueCents),
+  };
+}
+
+function paymentInstructionsBlock({
+  baseCents,
+  payUrl = "",
+  number = "",
+  heading = "How to pay",
+  blurb = "",
+  etransferTitle = "Pay via e-Transfer",
+  cardTitle = "Pay by card",
+  buttonLabel = "Pay by card",
+}) {
+  const base = Math.max(0, Math.round(Number(baseCents) || 0));
+  const card = cardTotalCents(base);
+  const fee = cardFeeCents(base);
+  const memo = number || "your quote/invoice number";
+  const cardBtn = payUrl
+    ? `<a href="${escapeHtmlText(payUrl)}" style="display:block;width:100%;box-sizing:border-box;margin-top:14px;padding:14px 16px;background:#b8953e;color:#141820;text-decoration:none;font-weight:700;font-size:15px;border-radius:10px;text-align:center;">${escapeHtmlText(buttonLabel)}</a>`
+    : "";
+  const blurbHtml = blurb
+    ? `<p style="margin:0 0 12px;font-size:12px;line-height:1.45;color:#5c6570;">${escapeHtmlText(blurb)}</p>`
+    : "";
+  // Stacked (not side-by-side) so phone/Outlook don't crush text into the button.
+  return {
+    html: `
+      <div style="margin-top:28px;">
+        <div style="font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:#8a7340;font-weight:700;margin-bottom:6px;">${escapeHtmlText(heading)}</div>
+        ${blurbHtml}
+        <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="margin:0 0 12px;">
+          <tr>
+            <td style="padding:16px;background:#f7f2e8;border-radius:12px;border:1px solid #e0d6c4;">
+              <div style="font-size:15px;font-weight:700;color:#1c2430;">${escapeHtmlText(etransferTitle)}</div>
+              <p style="margin:8px 0 0;font-size:13px;line-height:1.5;color:#3a424c;">No extra fee.</p>
+              <p style="margin:12px 0 0;font-size:20px;font-weight:700;color:#1c2430;word-break:break-word;">${escapeHtmlText(formatCadCents(base))}</p>
+              <p style="margin:10px 0 0;font-size:13px;line-height:1.55;color:#3a424c;word-break:break-word;">
+                Send Interac to <strong style="color:#1c2430;">${escapeHtmlText(COMPANY.accountingEmail)}</strong><br/>
+                Memo: <strong style="color:#1c2430;">${escapeHtmlText(memo)}</strong>
+              </p>
+            </td>
+          </tr>
+        </table>
+        <table width="100%" cellpadding="0" cellspacing="0" role="presentation">
+          <tr>
+            <td style="padding:16px;background:#f7f2e8;border-radius:12px;border:1px solid #e0d6c4;">
+              <div style="font-size:15px;font-weight:700;color:#1c2430;">${escapeHtmlText(cardTitle)}</div>
+              <p style="margin:8px 0 0;font-size:13px;line-height:1.5;color:#3a424c;">Includes 3.5% card processing (${escapeHtmlText(formatCadCents(fee))}).</p>
+              <p style="margin:12px 0 0;font-size:20px;font-weight:700;color:#1c2430;word-break:break-word;">${escapeHtmlText(formatCadCents(card))}</p>
+              <p style="margin:6px 0 0;font-size:12px;line-height:1.45;color:#5c6570;">${escapeHtmlText(formatCadCents(base))} + 3.5%</p>
+              ${cardBtn}
+            </td>
+          </tr>
+        </table>
+      </div>`,
+    text: [
+      `${heading}:`,
+      blurb || "",
+      "",
+      `${etransferTitle} (no fee):`,
+      `  Amount: ${formatCadCents(base)}`,
+      `  Send to: ${COMPANY.accountingEmail}`,
+      `  Memo: ${memo}`,
+      "",
+      `${cardTitle} (+3.5% processing):`,
+      `  Amount: ${formatCadCents(card)} (${formatCadCents(base)} + ${formatCadCents(fee)})`,
+      payUrl ? `  Pay here: ${payUrl}` : "",
+    ]
+      .filter((line) => line !== "")
+      .join("\n"),
+  };
+}
+
+async function stripeRequest(env, path, params) {
+  const key = cleanText(env.STRIPE_SECRET_KEY || "", 200);
+  if (!key) return { error: "Stripe is not configured.", status: 503 };
+  const body = new URLSearchParams();
+  for (const [k, v] of Object.entries(params || {})) {
+    if (v === undefined || v === null || v === "") continue;
+    body.append(k, String(v));
+  }
+  const res = await fetch(`https://api.stripe.com/v1${path}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    return {
+      error: data?.error?.message || "Stripe request failed.",
+      status: res.status >= 400 && res.status < 600 ? res.status : 502,
+      data,
+    };
+  }
+  return { data };
+}
+
+async function createStripeCheckoutSession(env, {
+  kind,
+  entityId,
+  leadId,
+  baseCents,
+  number,
+  title,
+  successUrl,
+  cancelUrl,
+  customerEmail = "",
+}) {
+  const base = Math.max(0, Math.round(Number(baseCents) || 0));
+  if (base < 50) return { error: "Amount is too small to charge by card.", status: 400 };
+  const total = cardTotalCents(base);
+  const fee = cardFeeCents(base);
+  const email = cleanText(customerEmail, 160).toLowerCase();
+  const result = await stripeRequest(env, "/checkout/sessions", {
+    mode: "payment",
+    success_url: successUrl,
+    cancel_url: cancelUrl,
+    ...(email.includes("@") ? { customer_email: email } : {}),
+    "line_items[0][quantity]": "1",
+    "line_items[0][price_data][currency]": "cad",
+    "line_items[0][price_data][unit_amount]": String(total),
+    "line_items[0][price_data][product_data][name]": `${kind === "invoice" ? "Invoice" : "Deposit"} ${number}`,
+    "line_items[0][price_data][product_data][description]": `${title || ""} · includes 3.5% card processing`.trim(),
+    "metadata[kind]": kind,
+    "metadata[entityId]": entityId,
+    "metadata[leadId]": leadId || "",
+    "metadata[baseCents]": String(base),
+    "metadata[feeCents]": String(fee),
+    "metadata[number]": number || "",
+    "payment_intent_data[metadata][kind]": kind,
+    "payment_intent_data[metadata][entityId]": entityId,
+  });
+  if (result.error) return result;
+  return { session: result.data, baseCents: base, feeCents: fee, totalCents: total };
+}
+
+function stripeCheckoutCustomerEmail(session) {
+  return cleanText(
+    session?.customer_details?.email || session?.customer_email || "",
+    160
+  ).toLowerCase();
+}
+
+function buildPaymentReceiptEmail({
+  kind,
+  number,
+  title,
+  clientName,
+  baseCents,
+  feeCents,
+  totalCents,
+  paymentRef = "",
+  paidAt = "",
+}) {
+  const isInvoice = kind === "invoice";
+  const label = isInvoice ? "Invoice payment" : "Deposit payment";
+  const kicker = isInvoice ? "Receipt" : "Deposit receipt";
+  const when = paidAt
+    ? (() => {
+        try {
+          return new Intl.DateTimeFormat("en-CA", {
+            dateStyle: "medium",
+            timeStyle: "short",
+            timeZone: "America/Vancouver",
+          }).format(new Date(paidAt));
+        } catch {
+          return paidAt;
+        }
+      })()
+    : "";
+  const header = emailBrandHeaderHtml({
+    logoUrl: "cid:vds-logo",
+    kicker,
+    number: number || "",
+    detailHtml: when ? `Paid ${escapeHtmlText(when)}` : "Payment received",
+  });
+  const html = `<!DOCTYPE html>
+<html><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /></head>
+<body style="margin:0;padding:0;background:#eef1f5;color:#1c2430;">
+  <div style="max-width:640px;margin:0 auto;padding:16px 12px;font-family:Segoe UI,Helvetica,Arial,sans-serif;">
+    <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="background:#ffffff;border:1px solid #d7dde6;border-radius:12px;overflow:hidden;">
+      <tr><td>${header}</td></tr>
+      <tr>
+        <td style="padding:24px 20px;">
+          <p style="margin:0;font-size:15px;line-height:1.55;color:#3a424c;">
+            Hi${clientName ? ` ${escapeHtmlText(clientName)}` : ""},
+          </p>
+          <p style="margin:12px 0 0;font-size:15px;line-height:1.55;color:#3a424c;">
+            Thank you — we received your card payment for
+            <strong style="color:#1c2430;">${escapeHtmlText(title || label)} (${escapeHtmlText(number || "")})</strong>.
+          </p>
+          <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="margin:20px 0 0;background:#f7f2e8;border:1px solid #e0d6c4;border-radius:12px;">
+            <tr><td style="padding:16px;">
+              <div style="font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:#8a7340;font-weight:700;">Amount charged</div>
+              <div style="margin-top:8px;font-size:28px;font-weight:700;color:#1c2430;">${escapeHtmlText(formatCadCents(totalCents))}</div>
+              <p style="margin:12px 0 0;font-size:13px;line-height:1.55;color:#3a424c;">
+                ${isInvoice ? "Invoice balance" : "Deposit"}: ${escapeHtmlText(formatCadCents(baseCents))}<br/>
+                Card processing (3.5%): ${escapeHtmlText(formatCadCents(feeCents))}
+              </p>
+              ${
+                paymentRef
+                  ? `<p style="margin:10px 0 0;font-size:12px;color:#5c6570;">Reference: ${escapeHtmlText(paymentRef)}</p>`
+                  : ""
+              }
+            </td></tr>
+          </table>
+          <p style="margin:18px 0 0;font-size:13px;line-height:1.55;color:#5c6570;">
+            ${
+              isInvoice
+                ? "This invoice is marked paid in our records."
+                : "This kickoff deposit is on file. The balance will be invoiced separately."
+            }
+          </p>
+          <div style="margin-top:24px;padding-top:14px;border-top:1px solid #e6e1d6;font-size:12px;color:#5c6570;line-height:1.55;">
+            Questions? Write <strong style="color:#1c2430;">${escapeHtmlText(COMPANY.email)}</strong>.<br/>
+            — ${escapeHtmlText(COMPANY.name)} · ${escapeHtmlText(COMPANY.web)}
+          </div>
+        </td>
+      </tr>
+    </table>
+  </div>
+</body></html>`;
+  const text = [
+    `${COMPANY.name} — ${label} receipt`,
+    "",
+    `Hi${clientName ? ` ${clientName}` : ""},`,
+    "",
+    `Thank you — we received your card payment for ${title || label} (${number || ""}).`,
+    "",
+    `Amount charged: ${formatCadCents(totalCents)}`,
+    `${isInvoice ? "Invoice balance" : "Deposit"}: ${formatCadCents(baseCents)}`,
+    `Card processing (3.5%): ${formatCadCents(feeCents)}`,
+    paymentRef ? `Reference: ${paymentRef}` : "",
+    when ? `Paid: ${when}` : "",
+    "",
+    isInvoice
+      ? "This invoice is marked paid in our records."
+      : "This kickoff deposit is on file. The balance will be invoiced separately.",
+    "",
+    `Questions? ${COMPANY.email}`,
+    `— ${COMPANY.name}`,
+  ]
+    .filter((line) => line !== "")
+    .join("\n");
+  return {
+    subject: `Receipt · ${number || label} · ${formatCadCents(totalCents)}`,
+    html,
+    text,
+  };
+}
+
+async function sendCardPaymentReceipt(env, {
+  session,
+  kind,
+  number,
+  title,
+  clientName,
+  leadId,
+  billToEmail = "",
+  baseCents,
+  feeCents,
+}) {
+  const totalCents =
+    Math.max(0, Math.round(Number(session?.amount_total) || 0)) || cardTotalCents(baseCents);
+  const fee = Math.max(0, Math.round(Number(feeCents) || cardFeeCents(baseCents)));
+  const base = Math.max(0, Math.round(Number(baseCents) || 0));
+  let toEmail = stripeCheckoutCustomerEmail(session);
+  if (!toEmail.includes("@") && billToEmail) toEmail = cleanText(billToEmail, 160).toLowerCase();
+  if (!toEmail.includes("@") && leadId) {
+    const lead = await getLead(env, leadId);
+    toEmail = cleanText(lead?.email || "", 160).toLowerCase();
+  }
+  if (!toEmail.includes("@")) {
+    return { status: "skipped", error: "No recipient email for receipt." };
+  }
+  const receipt = buildPaymentReceiptEmail({
+    kind,
+    number,
+    title,
+    clientName: clientName || session?.customer_details?.name || "",
+    baseCents: base,
+    feeCents: fee,
+    totalCents,
+    paymentRef:
+      (typeof session?.payment_intent === "string"
+        ? session.payment_intent
+        : session?.payment_intent?.id) ||
+      session?.id ||
+      "",
+    paidAt: session?.created
+      ? new Date(Number(session.created) * 1000).toISOString()
+      : nowIso(),
+  });
+  const logo = await logoInlineAttachment(env);
+  const delivery = await deliverReminder(env, {
+    toEmail,
+    subject: receipt.subject,
+    body: receipt.text,
+    html: receipt.html,
+    attachments: logo ? [logo] : undefined,
+  });
+
+  // Owner copy (best-effort)
+  const ownerEmail = cleanText(
+    env.CRM_OWNER_EMAIL || COMPANY.email || "",
+    160
+  ).toLowerCase();
+  if (ownerEmail && ownerEmail !== toEmail) {
+    await deliverReminder(env, {
+      toEmail: ownerEmail,
+      subject: `Paid · ${number || kind} · ${formatCadCents(totalCents)}`,
+      body: [
+        `Card payment received from ${clientName || toEmail}.`,
+        "",
+        `Type: ${kind === "invoice" ? "Invoice" : "Quote deposit"}`,
+        `Number: ${number || "—"}`,
+        `Charged: ${formatCadCents(totalCents)} (base ${formatCadCents(base)} + fee ${formatCadCents(fee)})`,
+        `Client email: ${toEmail}`,
+        "",
+        `— ${COMPANY.name}`,
+      ].join("\n"),
+    }).catch(() => null);
+  }
+  return { ...delivery, toEmail };
+}
+
+async function verifyStripeWebhook(env, rawBody, signatureHeader) {
+  const secret = cleanText(env.STRIPE_WEBHOOK_SECRET || "", 200);
+  if (!secret) return { error: "Webhook secret not configured.", status: 503 };
+  const header = String(signatureHeader || "");
+  const timestamp = header
+    .split(",")
+    .map((p) => p.trim())
+    .find((p) => p.startsWith("t="))
+    ?.slice(2);
+  const v1List = header
+    .split(",")
+    .map((p) => p.trim())
+    .filter((p) => p.startsWith("v1="))
+    .map((p) => p.slice(3))
+    .filter(Boolean);
+  if (!timestamp || !v1List.length) return { error: "Invalid Stripe signature.", status: 400 };
+  const age = Math.abs(Math.floor(Date.now() / 1000) - Number(timestamp));
+  if (!Number.isFinite(age) || age > 60 * 5) {
+    return { error: "Stripe signature timestamp too old.", status: 400 };
+  }
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const signed = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    encoder.encode(`${timestamp}.${rawBody}`)
+  );
+  const expected = [...new Uint8Array(signed)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  const signatureOk = v1List.some((v1) => {
+    if (expected.length !== v1.length) return false;
+    let ok = 0;
+    for (let i = 0; i < expected.length; i += 1) ok |= expected.charCodeAt(i) ^ v1.charCodeAt(i);
+    return ok === 0;
+  });
+  if (!signatureOk) return { error: "Invalid Stripe signature.", status: 400 };
+  try {
+    return { event: JSON.parse(rawBody) };
+  } catch {
+    return { error: "Invalid webhook payload.", status: 400 };
+  }
+}
+
+async function insertDeposit(env, fields) {
+  const id = newId("dep");
+  const ts = nowIso();
+  await env.DB.prepare(
+    `INSERT INTO client_deposits
+      (id, lead_id, quote_id, invoice_id, amount_cents, fee_cents, method, status,
+       stripe_session_id, stripe_payment_intent, note, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  )
+    .bind(
+      id,
+      fields.leadId,
+      fields.quoteId || null,
+      fields.invoiceId || null,
+      Math.max(0, Math.round(Number(fields.amountCents) || 0)),
+      Math.max(0, Math.round(Number(fields.feeCents) || 0)),
+      fields.method || "manual",
+      fields.status || "received",
+      fields.stripeSessionId || null,
+      fields.stripePaymentIntent || null,
+      cleanText(fields.note || "", 2000),
+      ts,
+      ts
+    )
+    .run();
+  const row = await env.DB.prepare("SELECT * FROM client_deposits WHERE id = ?").bind(id).first();
+  return rowToDeposit(row);
+}
+
+async function handleStripeCheckoutCompleted(env, session) {
+  const meta = session?.metadata || {};
+  const kind = cleanText(meta.kind, 20);
+  const entityId = cleanText(meta.entityId, 64);
+  const baseCents = Math.max(0, Math.round(Number(meta.baseCents) || 0));
+  const feeCents = Math.max(0, Math.round(Number(meta.feeCents) || cardFeeCents(baseCents)));
+  const sessionId = cleanText(session.id, 120);
+  const paymentIntent =
+    typeof session.payment_intent === "string"
+      ? session.payment_intent
+      : cleanText(session.payment_intent?.id, 120);
+  const paymentStatus = cleanText(session.payment_status, 40);
+  if (paymentStatus && paymentStatus !== "paid") {
+    return { ok: true, ignored: true, reason: `payment_status=${paymentStatus}` };
+  }
+
+  if (sessionId) {
+    const existing = await env.DB.prepare(
+      "SELECT id FROM client_deposits WHERE stripe_session_id = ?"
+    )
+      .bind(sessionId)
+      .first()
+      .catch(() => null);
+    if (existing) return { ok: true, duplicate: true };
+  }
+
+  if (kind === "quote") {
+    const quote = await getQuote(env, entityId);
+    if (!quote?.leadId) return { error: "Quote not found for payment.", status: 404 };
+    const already = await quoteHasActiveDeposit(env, quote.id);
+    if (already) {
+      // Don't silently accept a second deposit charge for the same quote.
+      await recordActivity(env, quote.leadId, {
+        kind: "payment",
+        entityType: "quote",
+        entityId: quote.id,
+        summary: `Duplicate card checkout ignored · quote ${quote.number} already had a deposit (${formatCadCents(baseCents)})`,
+        meta: { method: "card", sessionId, paymentIntent, duplicate: true },
+        at: nowIso(),
+      }).catch(() => null);
+      return { ok: true, duplicate: true, reason: "quote_already_has_deposit" };
+    }
+    const deposit = await insertDeposit(env, {
+      leadId: quote.leadId,
+      quoteId: quote.id,
+      amountCents: baseCents || quote.amountCents,
+      feeCents,
+      method: "card",
+      status: "received",
+      stripeSessionId: sessionId,
+      stripePaymentIntent: paymentIntent,
+      note: `Card deposit for quote ${quote.number}`,
+    });
+    await recordActivity(env, quote.leadId, {
+      kind: "payment",
+      entityType: "quote",
+      entityId: quote.id,
+      summary: `Card deposit received · ${formatCadCents(deposit.amountCents)} (fee ${formatCadCents(deposit.feeCents)})`,
+      meta: { depositId: deposit.id, method: "card", sessionId },
+      at: nowIso(),
+    });
+    let receipt = null;
+    try {
+      receipt = await sendCardPaymentReceipt(env, {
+        session,
+        kind: "quote",
+        number: quote.number,
+        title: quote.title,
+        clientName: quote.clientName,
+        leadId: quote.leadId,
+        baseCents: deposit.amountCents,
+        feeCents: deposit.feeCents,
+      });
+    } catch (err) {
+      receipt = { status: "failed", error: String(err?.message || err) };
+    }
+    return { ok: true, deposit, receipt };
+  }
+
+  if (kind === "invoice") {
+    const invoice = await getInvoice(env, entityId);
+    if (!invoice?.leadId) return { error: "Invoice not found for payment.", status: 404 };
+
+    if (invoice.status === "paid") {
+      const credit = await insertDeposit(env, {
+        leadId: invoice.leadId,
+        amountCents: baseCents || 0,
+        feeCents,
+        method: "card",
+        status: "received",
+        stripeSessionId: sessionId,
+        stripePaymentIntent: paymentIntent,
+        note: `Card credit after invoice ${invoice.number} was already paid`,
+      });
+      await recordActivity(env, invoice.leadId, {
+        kind: "payment",
+        entityType: "invoice",
+        entityId: invoice.id,
+        summary: `Card credit on paid invoice ${invoice.number} · ${formatCadCents(credit.amountCents)}`,
+        meta: { depositId: credit.id, method: "card", sessionId, overpay: true },
+        at: nowIso(),
+      });
+      let receipt = null;
+      try {
+        receipt = await sendCardPaymentReceipt(env, {
+          session,
+          kind: "invoice",
+          number: invoice.number,
+          title: invoice.title,
+          clientName: invoice.clientName || invoice.billToName,
+          leadId: invoice.leadId,
+          billToEmail: invoice.billToEmail,
+          baseCents: credit.amountCents,
+          feeCents: credit.feeCents,
+        });
+      } catch (err) {
+        receipt = { status: "failed", error: String(err?.message || err) };
+      }
+      return { ok: true, overpay: true, deposit: credit, receipt };
+    }
+
+    const appliedFromDeposits = await applyReceivedDepositsToInvoice(
+      env,
+      invoice.leadId,
+      invoice.id,
+      invoice.amountCents || 0
+    );
+    const stillDue = Math.max(0, (invoice.amountCents || 0) - appliedFromDeposits);
+    const applyCard = Math.min(baseCents, stillDue);
+    const leftoverCard = Math.max(0, baseCents - applyCard);
+    const feeForApplied =
+      baseCents > 0 ? Math.round((feeCents * applyCard) / baseCents) : 0;
+    const feeLeft = Math.max(0, feeCents - feeForApplied);
+
+    if (applyCard > 0) {
+      await insertDeposit(env, {
+        leadId: invoice.leadId,
+        invoiceId: invoice.id,
+        amountCents: applyCard,
+        feeCents: feeForApplied,
+        method: "card",
+        status: "applied",
+        stripeSessionId: leftoverCard > 0 ? null : sessionId,
+        stripePaymentIntent: leftoverCard > 0 ? null : paymentIntent,
+        note: `Card payment for invoice ${invoice.number}`,
+      });
+    }
+    if (leftoverCard > 0 || (applyCard <= 0 && baseCents > 0)) {
+      await insertDeposit(env, {
+        leadId: invoice.leadId,
+        amountCents: leftoverCard > 0 ? leftoverCard : baseCents,
+        feeCents: leftoverCard > 0 ? feeLeft : feeCents,
+        method: "card",
+        status: "received",
+        stripeSessionId: sessionId,
+        stripePaymentIntent: paymentIntent,
+        note:
+          leftoverCard > 0
+            ? `Leftover card credit after paying invoice ${invoice.number}`
+            : `Card credit — invoice ${invoice.number} covered by deposits`,
+      });
+    }
+
+    // Mark paid without re-entering deposit application via updateInvoice side-effects.
+    await env.DB.prepare(`UPDATE invoices SET status = 'paid', updated_at = ? WHERE id = ?`)
+      .bind(nowIso(), invoice.id)
+      .run();
+    await recordActivity(env, invoice.leadId, {
+      kind: "payment",
+      entityType: "invoice",
+      entityId: invoice.id,
+      summary: `Invoice ${invoice.number} paid by card · ${formatCadCents(baseCents)}`,
+      meta: { method: "card", sessionId },
+      at: nowIso(),
+    });
+    let receipt = null;
+    try {
+      receipt = await sendCardPaymentReceipt(env, {
+        session,
+        kind: "invoice",
+        number: invoice.number,
+        title: invoice.title,
+        clientName: invoice.clientName || invoice.billToName,
+        leadId: invoice.leadId,
+        billToEmail: invoice.billToEmail,
+        baseCents,
+        feeCents,
+      });
+    } catch (err) {
+      receipt = { status: "failed", error: String(err?.message || err) };
+    }
+    return { ok: true, receipt };
+  }
+
+  return { error: "Unknown payment kind.", status: 400 };
+}
+
+async function settleInvoiceIfCoveredByDeposits(env, invoice) {
+  if (!invoice?.leadId || !invoice?.id || invoice.status === "paid") return invoice;
+  if ((invoice.balanceDueCents || 0) > 0) return invoice;
+  await applyReceivedDepositsToInvoice(
+    env,
+    invoice.leadId,
+    invoice.id,
+    invoice.amountCents || 0
+  );
+  await env.DB.prepare(`UPDATE invoices SET status = 'paid', updated_at = ? WHERE id = ? AND status != 'paid'`)
+    .bind(nowIso(), invoice.id)
+    .run();
+  await recordActivity(env, invoice.leadId, {
+    kind: "payment",
+    entityType: "invoice",
+    entityId: invoice.id,
+    summary: `Invoice ${invoice.number} settled from deposit credit`,
+    meta: { method: "deposit" },
+    at: nowIso(),
+  });
+  return getInvoice(env, invoice.id);
+}
+
+async function publicPayPreview(env, kind, token, requestUrl = "") {
+  if (kind === "quote") {
+    const row = await getQuoteByPayToken(env, token);
+    if (!row) return { error: "This payment link is invalid or expired.", status: 404 };
+    const quote = rowToQuote(row);
+    const depositDueCents = quote.depositDueCents || quoteDepositDueCents(quote);
+    const alreadyPaid = await quoteHasActiveDeposit(env, quote.id);
+    const origin = publicAppOrigin(env, requestUrl);
+    const signToken = cleanText(row.sign_token || "", 80);
+    const signUrl = origin && signToken ? `${origin}/sign/q/${encodeURIComponent(signToken)}` : "";
+    return {
+      kind: "quote",
+      number: quote.number,
+      title: quote.title,
+      clientName: quote.clientName,
+      status: quote.status,
+      amountCents: quote.amountCents,
+      depositDueCents,
+      baseCents: depositDueCents,
+      cardFeeCents: cardFeeCents(depositDueCents),
+      cardTotalCents: cardTotalCents(depositDueCents),
+      accountingEmail: COMPANY.accountingEmail,
+      alreadyPaid,
+      needsSignature: quote.status !== "approved" && quote.status !== "declined",
+      signUrl,
+      company: {
+        name: COMPANY.name,
+        email: COMPANY.email,
+        accountingEmail: COMPANY.accountingEmail,
+        web: COMPANY.web,
+        tagline: COMPANY.tagline,
+      },
+    };
+  }
+  if (kind === "invoice") {
+    const row = await getInvoiceByPayToken(env, token);
+    if (!row) return { error: "This payment link is invalid or expired.", status: 404 };
+    let invoice = await enrichInvoicePayments(env, rowToInvoice(row));
+    if (invoice.status !== "paid" && invoice.balanceDueCents <= 0) {
+      invoice = (await settleInvoiceIfCoveredByDeposits(env, invoice)) || invoice;
+    }
+    return {
+      kind: "invoice",
+      number: invoice.number,
+      title: invoice.title,
+      clientName: invoice.clientName,
+      status: invoice.status,
+      amountCents: invoice.amountCents,
+      depositAvailableCents: invoice.depositAvailableCents,
+      baseCents: invoice.balanceDueCents,
+      cardFeeCents: invoice.cardFeeCents,
+      cardTotalCents: invoice.cardTotalCents,
+      accountingEmail: COMPANY.accountingEmail,
+      alreadyPaid: invoice.status === "paid" || invoice.balanceDueCents <= 0,
+      company: {
+        name: COMPANY.name,
+        email: COMPANY.email,
+        accountingEmail: COMPANY.accountingEmail,
+        web: COMPANY.web,
+        tagline: COMPANY.tagline,
+      },
+    };
+  }
+  return { error: "Unknown payment type.", status: 400 };
+}
+
+async function startPublicCheckout(env, body, requestUrl) {
+  const kind = cleanText(body.kind, 20);
+  const token = cleanText(body.token, 80);
+  const preview = await publicPayPreview(env, kind, token, requestUrl);
+  if (preview.error) return preview;
+  if (preview.alreadyPaid) {
+    return { error: "This is already paid — nothing left to charge.", status: 400 };
+  }
+  if ((preview.baseCents || 0) < 50) {
+    return { error: "Amount is too small to charge by card.", status: 400 };
+  }
+  const origin = publicAppOrigin(env, requestUrl);
+  if (!origin) return { error: "Missing request origin.", status: 400 };
+
+  let entityId = "";
+  let leadId = "";
+  let signToken = "";
+  if (kind === "quote") {
+    const row = await getQuoteByPayToken(env, token);
+    if (!row) return { error: "This payment link is invalid or expired.", status: 404 };
+    if (row.status !== "approved") {
+      const st = cleanText(row.sign_token || "", 80);
+      const signUrl = st ? `${origin}/sign/q/${encodeURIComponent(st)}` : "";
+      return {
+        error: "Please sign and approve this quote before paying the deposit.",
+        status: 400,
+        needsSignature: true,
+        signUrl,
+      };
+    }
+    entityId = row.id;
+    leadId = row.lead_id || "";
+    signToken = cleanText(row.sign_token || "", 80);
+  } else {
+    const row = await getInvoiceByPayToken(env, token);
+    if (!row) return { error: "This payment link is invalid or expired.", status: 404 };
+    entityId = row.id;
+    leadId = row.lead_id || "";
+  }
+  if (!leadId) {
+    return { error: "This payment link is not linked to a client yet.", status: 400 };
+  }
+
+  const lead = await getLead(env, leadId);
+  let customerEmail = cleanText(lead?.email || "", 160).toLowerCase();
+  if (kind === "invoice" && !customerEmail.includes("@")) {
+    const invoice = await getInvoice(env, entityId);
+    customerEmail = cleanText(invoice?.billToEmail || "", 160).toLowerCase();
+  }
+
+  const pathPrefix = kind === "invoice" ? `/pay/i/${encodeURIComponent(token)}` : `/pay/q/${encodeURIComponent(token)}`;
+  const quoteReturn = signToken ? `${origin}/sign/q/${encodeURIComponent(signToken)}` : `${origin}${pathPrefix}`;
+  const session = await createStripeCheckoutSession(env, {
+    kind,
+    entityId,
+    leadId,
+    baseCents: preview.baseCents,
+    number: preview.number,
+    title: preview.title,
+    customerEmail,
+    successUrl: kind === "quote" ? `${quoteReturn}?paid=1` : `${origin}${pathPrefix}?paid=1`,
+    cancelUrl: kind === "quote" ? `${quoteReturn}?cancelled=1` : `${origin}${pathPrefix}?cancelled=1`,
+  });
+  if (session.error) return session;
+  return { url: session.session.url, sessionId: session.session.id };
+}
+
+async function createManualDeposit(env, leadId, body = {}) {
+  const lead = await getLead(env, leadId);
+  if (!lead) return { error: "Client not found.", status: 404 };
+  const amountCents = moneyToCents(body.amountCents ?? body.amount, {
+    alreadyCents: body.amountCents !== undefined,
+  });
+  if (amountCents <= 0) return { error: "Deposit amount must be greater than zero.", status: 400 };
+  const method = normalizeDepositMethod(body.method) || "manual";
+  const status = normalizeDepositStatus(body.status) || "received";
+  const deposit = await insertDeposit(env, {
+    leadId,
+    quoteId: cleanText(body.quoteId ?? body.quote_id, 64) || null,
+    invoiceId: cleanText(body.invoiceId ?? body.invoice_id, 64) || null,
+    amountCents,
+    feeCents: Math.max(0, Math.round(Number(body.feeCents) || 0)),
+    method,
+    status,
+    note: cleanText(body.note, 2000),
+  });
+  await recordActivity(env, leadId, {
+    kind: "payment",
+    entityType: "deposit",
+    entityId: deposit.id,
+    summary: `Deposit recorded · ${formatCadCents(deposit.amountCents)} · ${deposit.method}`,
+    meta: { depositId: deposit.id, method: deposit.method, status: deposit.status },
+    at: nowIso(),
+  });
+  return { deposit };
+}
+
+async function updateDeposit(env, id, body = {}) {
+  const row = await env.DB.prepare("SELECT * FROM client_deposits WHERE id = ?").bind(id).first();
+  if (!row) return { error: "Deposit not found.", status: 404 };
+  const amountCents =
+    body.amountCents !== undefined || body.amount !== undefined
+      ? moneyToCents(body.amountCents ?? body.amount, {
+          alreadyCents: body.amountCents !== undefined,
+        })
+      : Number(row.amount_cents) || 0;
+  if (amountCents < 0) return { error: "Amount cannot be negative.", status: 400 };
+  const method = body.method !== undefined ? normalizeDepositMethod(body.method) : row.method;
+  if (body.method !== undefined && !method) return { error: "Invalid deposit method.", status: 400 };
+  const status = body.status !== undefined ? normalizeDepositStatus(body.status) : row.status;
+  if (body.status !== undefined && !status) return { error: "Invalid deposit status.", status: 400 };
+  const note = body.note !== undefined ? cleanText(body.note, 2000) : row.note || "";
+  const invoiceId =
+    body.invoiceId !== undefined || body.invoice_id !== undefined
+      ? cleanText(body.invoiceId ?? body.invoice_id, 64) || null
+      : row.invoice_id;
+  const ts = nowIso();
+  await env.DB.prepare(
+    `UPDATE client_deposits
+     SET amount_cents = ?, method = ?, status = ?, note = ?, invoice_id = ?, updated_at = ?
+     WHERE id = ?`
+  )
+    .bind(amountCents, method, status, note, invoiceId, ts, id)
+    .run();
+  const updated = await env.DB.prepare("SELECT * FROM client_deposits WHERE id = ?").bind(id).first();
+  return { deposit: rowToDeposit(updated) };
+}
+
+async function deleteDeposit(env, id) {
+  const row = await env.DB.prepare("SELECT * FROM client_deposits WHERE id = ?").bind(id).first();
+  if (!row) return { error: "Deposit not found.", status: 404 };
+  await env.DB.prepare("DELETE FROM client_deposits WHERE id = ?").bind(id).run();
+  return { ok: true };
+}
 
 function escapeHtmlText(value) {
   return String(value ?? "")
@@ -3582,15 +5502,12 @@ function rowToInvoice(row) {
   };
 }
 
-function buildInvoiceLetterheadHtml(invoice, { absoluteLogoUrl = "" } = {}) {
-  const logo = absoluteLogoUrl
-    ? `<img src="${escapeHtmlText(absoluteLogoUrl)}" alt="Vanderven Systems" width="140" style="display:block;max-width:140px;height:auto;" />`
-    : `<div style="font-family:Georgia,serif;font-size:22px;font-weight:700;color:#1c2430;">Vanderven <span style="font-weight:500;color:#8a7340;">Systems</span></div>`;
+function buildInvoiceLetterheadHtml(invoice, { absoluteLogoUrl = "", payUrl = "" } = {}) {
   const rows = (invoice.lineItems || [])
     .map(
       (item) => `
       <tr>
-        <td style="padding:10px 8px;border-bottom:1px solid #e6e1d6;font-size:13px;color:#1c2430;">${escapeHtmlText(item.description)}</td>
+        <td style="padding:10px 8px;border-bottom:1px solid #e6e1d6;font-size:13px;color:#1c2430;word-break:break-word;">${escapeHtmlText(item.description)}</td>
         <td style="padding:10px 8px;border-bottom:1px solid #e6e1d6;font-size:13px;text-align:right;color:#1c2430;">${escapeHtmlText(String(item.qty))}</td>
         <td style="padding:10px 8px;border-bottom:1px solid #e6e1d6;font-size:13px;text-align:right;color:#1c2430;">${escapeHtmlText(formatCadCents(item.unitCents))}</td>
         <td style="padding:10px 8px;border-bottom:1px solid #e6e1d6;font-size:13px;text-align:right;color:#1c2430;font-weight:600;">${escapeHtmlText(formatCadCents(Math.round(item.qty * item.unitCents)))}</td>
@@ -3607,90 +5524,106 @@ function buildInvoiceLetterheadHtml(invoice, { absoluteLogoUrl = "" } = {}) {
     .filter(Boolean)
     .map((p) => escapeHtmlText(p))
     .join("<br/>");
+  const header = emailBrandHeaderHtml({
+    logoUrl: absoluteLogoUrl,
+    kicker: "Invoice",
+    number: invoice.number,
+    detailHtml: `Issued ${escapeHtmlText(invoice.issueDate || "—")}<br/>Due ${escapeHtmlText(invoice.dueDate || "—")}`,
+  });
 
   return `<!DOCTYPE html>
-<html><head><meta charset="utf-8" /><title>Invoice ${escapeHtmlText(invoice.number)}</title></head>
-<body style="margin:0;padding:0;background:#f3f0ea;color:#1c2430;">
-  <div style="max-width:720px;margin:0 auto;padding:28px 20px;font-family:Segoe UI,Helvetica,Arial,sans-serif;">
-    <div style="background:#fffaf3;border:1px solid #ddd4c4;border-radius:14px;overflow:hidden;">
-      <div style="padding:28px 32px 22px;background:linear-gradient(135deg,#1c2430 0%,#2d3a4a 55%,#3d3424 100%);color:#f7f1e6;">
-        <table width="100%" cellpadding="0" cellspacing="0"><tr>
-          <td style="vertical-align:top;">${logo}
-            <p style="margin:10px 0 0;font-size:12px;opacity:0.85;line-height:1.45;">${escapeHtmlText(COMPANY.tagline)}<br/>${escapeHtmlText(COMPANY.location)} · ${escapeHtmlText(COMPANY.email)}</p>
-          </td>
-          <td style="vertical-align:top;text-align:right;">
-            <div style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;opacity:0.75;">Invoice</div>
-            <div style="font-size:26px;font-weight:700;margin-top:4px;">${escapeHtmlText(invoice.number)}</div>
-            <div style="margin-top:10px;font-size:12px;line-height:1.5;opacity:0.9;">
-              Issued ${escapeHtmlText(invoice.issueDate || "—")}<br/>
-              Due ${escapeHtmlText(invoice.dueDate || "—")}
-            </div>
-          </td>
-        </tr></table>
-      </div>
-      <div style="padding:28px 32px;">
-        <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:22px;"><tr>
-          <td style="vertical-align:top;width:50%;">
-            <div style="font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:#8a7340;font-weight:700;">Bill to</div>
-            <div style="margin-top:8px;font-size:14px;line-height:1.55;font-weight:600;">${billTo || "—"}</div>
-          </td>
-          <td style="vertical-align:top;width:50%;text-align:right;">
-            <div style="font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:#8a7340;font-weight:700;">For</div>
-            <div style="margin-top:8px;font-size:14px;line-height:1.55;">${escapeHtmlText(invoice.title)}</div>
-            <div style="margin-top:6px;font-size:12px;color:#5c6570;">Terms: ${escapeHtmlText(invoice.paymentTerms || "Net 15")}</div>
-          </td>
-        </tr></table>
-        <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
-          <thead>
-            <tr style="background:#f4efe4;">
-              <th align="left" style="padding:10px 8px;font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:#5c6570;">Description</th>
-              <th align="right" style="padding:10px 8px;font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:#5c6570;">Qty</th>
-              <th align="right" style="padding:10px 8px;font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:#5c6570;">Rate</th>
-              <th align="right" style="padding:10px 8px;font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:#5c6570;">Amount</th>
-            </tr>
-          </thead>
-          <tbody>${rows}</tbody>
-        </table>
-        <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:18px;">
-          <tr><td></td><td style="width:240px;">
-            <table width="100%" cellpadding="0" cellspacing="0" style="font-size:13px;">
-              <tr>
-                <td style="padding:6px 0;color:#5c6570;">Subtotal</td>
-                <td style="padding:6px 0;text-align:right;">${escapeHtmlText(formatCadCents(invoice.subtotalCents))}</td>
+<html><head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Invoice ${escapeHtmlText(invoice.number)}</title>
+</head>
+<body style="margin:0;padding:0;background:#eef1f5;color:#1c2430;">
+  <div style="max-width:640px;margin:0 auto;padding:16px 12px;font-family:Segoe UI,Helvetica,Arial,sans-serif;">
+    <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="background:#ffffff;border:1px solid #d7dde6;border-radius:12px;overflow:hidden;">
+      <tr><td>${header}</td></tr>
+      <tr>
+        <td style="padding:24px 20px;">
+          <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:22px;"><tr>
+            <td style="vertical-align:top;width:50%;padding:0 8px 12px 0;">
+              <div style="font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:#8a7340;font-weight:700;">Bill to</div>
+              <div style="margin-top:8px;font-size:14px;line-height:1.55;font-weight:600;word-break:break-word;">${billTo || "—"}</div>
+            </td>
+            <td style="vertical-align:top;width:50%;padding:0 0 12px 8px;">
+              <div style="font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:#8a7340;font-weight:700;">For</div>
+              <div style="margin-top:8px;font-size:14px;line-height:1.55;word-break:break-word;">${escapeHtmlText(invoice.title)}</div>
+              <div style="margin-top:6px;font-size:12px;color:#5c6570;">Terms: ${escapeHtmlText(invoice.paymentTerms || "Net 15")}</div>
+            </td>
+          </tr></table>
+          <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+            <thead>
+              <tr style="background:#f4efe4;">
+                <th align="left" style="padding:10px 8px;font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:#5c6570;">Description</th>
+                <th align="right" style="padding:10px 8px;font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:#5c6570;">Qty</th>
+                <th align="right" style="padding:10px 8px;font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:#5c6570;">Rate</th>
+                <th align="right" style="padding:10px 8px;font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:#5c6570;">Amount</th>
               </tr>
-              <tr>
-                <td style="padding:6px 0;color:#5c6570;">Tax (${escapeHtmlText(String(invoice.taxRate))}%)</td>
-                <td style="padding:6px 0;text-align:right;">${escapeHtmlText(formatCadCents(invoice.taxCents))}</td>
-              </tr>
-              <tr>
-                <td style="padding:12px 0 0;font-size:15px;font-weight:700;border-top:2px solid #1c2430;">Total due</td>
-                <td style="padding:12px 0 0;text-align:right;font-size:15px;font-weight:700;border-top:2px solid #1c2430;">${escapeHtmlText(formatCadCents(invoice.amountCents))}</td>
-              </tr>
-            </table>
-          </td></tr>
-        </table>
-        ${
-          invoice.notes
-            ? `<div style="margin-top:22px;padding:14px 16px;background:#f7f2e8;border-radius:10px;font-size:12px;line-height:1.5;color:#3a424c;"><strong style="display:block;margin-bottom:4px;color:#8a7340;">Notes</strong>${escapeHtmlText(invoice.notes)}</div>`
-            : ""
-        }
-        <div style="margin-top:28px;padding-top:16px;border-top:1px solid #e6e1d6;font-size:12px;color:#5c6570;line-height:1.55;">
-          Please pay by e-transfer or arranged invoice terms to <strong style="color:#1c2430;">${escapeHtmlText(COMPANY.email)}</strong>.<br/>
-          Thank you for your business — ${escapeHtmlText(COMPANY.name)} · ${escapeHtmlText(COMPANY.web)}
-        </div>
-      </div>
-    </div>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+          <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:18px;">
+            <tr><td></td><td style="width:240px;max-width:100%;">
+              <table width="100%" cellpadding="0" cellspacing="0" style="font-size:13px;">
+                <tr>
+                  <td style="padding:6px 0;color:#5c6570;">Subtotal</td>
+                  <td style="padding:6px 0;text-align:right;">${escapeHtmlText(formatCadCents(invoice.subtotalCents))}</td>
+                </tr>
+                <tr>
+                  <td style="padding:6px 0;color:#5c6570;">Tax (${escapeHtmlText(String(invoice.taxRate))}%)</td>
+                  <td style="padding:6px 0;text-align:right;">${escapeHtmlText(formatCadCents(invoice.taxCents))}</td>
+                </tr>
+                ${
+                  Number(invoice.depositAvailableCents) > 0
+                    ? `<tr>
+                  <td style="padding:6px 0;color:#5c6570;">Deposit applied</td>
+                  <td style="padding:6px 0;text-align:right;">−${escapeHtmlText(formatCadCents(invoice.depositAvailableCents))}</td>
+                </tr>`
+                    : ""
+                }
+                <tr>
+                  <td style="padding:12px 0 0;font-size:15px;font-weight:700;border-top:2px solid #1c2430;">Balance due</td>
+                  <td style="padding:12px 0 0;text-align:right;font-size:15px;font-weight:700;border-top:2px solid #1c2430;">${escapeHtmlText(formatCadCents(invoice.balanceDueCents ?? invoice.amountCents))}</td>
+                </tr>
+              </table>
+            </td></tr>
+          </table>
+          ${
+            invoice.notes
+              ? `<div style="margin-top:22px;padding:14px 16px;background:#f7f2e8;border-radius:10px;font-size:12px;line-height:1.5;color:#3a424c;word-break:break-word;"><strong style="display:block;margin-bottom:4px;color:#8a7340;">Notes</strong>${escapeHtmlText(invoice.notes)}</div>`
+              : ""
+          }
+          ${paymentInstructionsBlock({
+            baseCents: invoice.balanceDueCents ?? invoice.amountCents,
+            payUrl,
+            number: invoice.number,
+          }).html}
+          <div style="margin-top:28px;padding-top:16px;border-top:1px solid #e6e1d6;font-size:12px;color:#5c6570;line-height:1.55;">
+            Thank you for your business — ${escapeHtmlText(COMPANY.name)} · ${escapeHtmlText(COMPANY.web)}
+          </div>
+        </td>
+      </tr>
+    </table>
   </div>
 </body></html>`;
 }
 
-function buildInvoicePlainText(invoice) {
+function buildInvoicePlainText(invoice, { payUrl = "" } = {}) {
   const lines = (invoice.lineItems || [])
     .map(
       (item) =>
         `- ${item.description} × ${item.qty} @ ${formatCadCents(item.unitCents)} = ${formatCadCents(Math.round(item.qty * item.unitCents))}`
     )
     .join("\n");
+  const balance = invoice.balanceDueCents ?? invoice.amountCents;
+  const pay = paymentInstructionsBlock({
+    baseCents: balance,
+    payUrl,
+    number: invoice.number,
+  });
   return [
     `${COMPANY.name} — Invoice ${invoice.number}`,
     invoice.title,
@@ -3707,10 +5640,14 @@ function buildInvoicePlainText(invoice) {
     "",
     `Subtotal: ${formatCadCents(invoice.subtotalCents)}`,
     `Tax (${invoice.taxRate}%): ${formatCadCents(invoice.taxCents)}`,
-    `Total due: ${formatCadCents(invoice.amountCents)}`,
+    `Invoice total: ${formatCadCents(invoice.amountCents)}`,
+    Number(invoice.depositAvailableCents) > 0
+      ? `Deposit applied: −${formatCadCents(invoice.depositAvailableCents)}`
+      : "",
+    `Balance due: ${formatCadCents(balance)}`,
     invoice.notes ? `\nNotes: ${invoice.notes}` : "",
     "",
-    `Pay to ${COMPANY.email}`,
+    pay.text,
     `— ${COMPANY.name}`,
   ]
     .filter((line) => line !== "")
@@ -3736,7 +5673,20 @@ async function listQuotes(env, { status } = {}) {
     if (!byQuote[row.quote_id]) byQuote[row.quote_id] = [];
     byQuote[row.quote_id].push(row.document_id);
   }
-  return quotes.map((quote) => ({ ...quote, documentIds: byQuote[quote.id] || [] }));
+  const filesByQuote = await listQuoteFilesByQuoteIds(
+    env,
+    quotes.map((quote) => quote.id)
+  );
+  const depositsByQuote = await listDepositSummariesByQuoteIds(
+    env,
+    quotes.map((quote) => quote.id)
+  );
+  return quotes.map((quote) => ({
+    ...quote,
+    documentIds: byQuote[quote.id] || [],
+    files: filesByQuote[quote.id] || [],
+    ...quoteDepositPaymentSummary(depositsByQuote[quote.id] || []),
+  }));
 }
 
 async function getQuote(env, id) {
@@ -3745,25 +5695,42 @@ async function getQuote(env, id) {
   return enrichQuote(env, rowToQuote(row, { includeSignature: true }));
 }
 
-async function issueQuoteSignToken(env, quoteId) {
+async function issueQuoteSignToken(env, quoteId, { resetSignature = true } = {}) {
   const token = newSignToken();
   const ts = nowIso();
   try {
-    await env.DB.prepare(
-      `UPDATE quotes SET
-        sign_token = ?, sign_token_created_at = ?,
-        signed_at = NULL, signed_name = '', signature_png = NULL,
-        signed_ip = NULL, signed_user_agent = NULL,
-        updated_at = ?
-       WHERE id = ?`
-    )
-      .bind(token, ts, ts, quoteId)
-      .run();
+    if (resetSignature) {
+      await env.DB.prepare(
+        `UPDATE quotes SET
+          sign_token = ?, sign_token_created_at = ?,
+          signed_at = NULL, signed_name = '', signature_png = NULL,
+          signed_ip = NULL, signed_user_agent = NULL,
+          updated_at = ?
+         WHERE id = ?`
+      )
+        .bind(token, ts, ts, quoteId)
+        .run();
+    } else {
+      await env.DB.prepare(
+        `UPDATE quotes SET
+          sign_token = ?, sign_token_created_at = ?, updated_at = ?
+         WHERE id = ?`
+      )
+        .bind(token, ts, ts, quoteId)
+        .run();
+    }
   } catch {
     // Columns missing until migration 0019.
     return null;
   }
   return token;
+}
+
+/** Keep existing sign token when present; never wipe a completed signature. */
+async function ensureQuoteSignToken(env, quote) {
+  const existing = cleanText(quote?.signToken || quote?.sign_token || "", 80);
+  if (existing) return existing;
+  return issueQuoteSignToken(env, quote.id, { resetSignature: false });
 }
 
 function isValidSignaturePng(dataUrl) {
@@ -3784,15 +5751,32 @@ async function getQuoteBySignToken(env, token) {
   }
 }
 
-function publicQuotePayload(row) {
+function publicQuotePayload(row, { payUrl = "", signUrl = "", alreadyPaid = false } = {}) {
   const quote = rowToQuote(row, { includeSignature: true });
+  const depositDueCents = quote.depositDueCents || quoteDepositDueCents(quote);
   return {
     number: quote.number,
     title: quote.title,
     clientName: quote.clientName,
+    subtotalCents: quote.subtotalCents,
+    discountCents: quote.discountCents,
+    discountLabel: quote.discountLabel || "",
+    discountNote: quote.discountNote || "",
     amountCents: quote.amountCents,
     amountLabel: formatCadCents(quote.amountCents),
+    depositDueCents,
+    depositDueLabel: formatCadCents(depositDueCents),
+    cardFeeCents: cardFeeCents(depositDueCents),
+    cardTotalCents: cardTotalCents(depositDueCents),
+    cardTotalLabel: formatCadCents(cardTotalCents(depositDueCents)),
+    payUrl: payUrl || "",
+    signUrl: signUrl || "",
+    alreadyPaid: Boolean(alreadyPaid),
+    accountingEmail: COMPANY.accountingEmail,
+    lineItems: quote.lineItems || [],
     notes: quote.notes,
+    terms: quote.terms || "",
+    addendums: quote.addendums || "",
     status: quote.status,
     signedAt: quote.signedAt,
     signedName: quote.signedName,
@@ -3801,6 +5785,7 @@ function publicQuotePayload(row) {
     company: {
       name: COMPANY.name,
       email: COMPANY.email,
+      accountingEmail: COMPANY.accountingEmail,
       web: COMPANY.web,
       location: COMPANY.location,
       tagline: COMPANY.tagline,
@@ -3808,23 +5793,104 @@ function publicQuotePayload(row) {
   };
 }
 
+function quoteOwnerNotifyEmail(env, row) {
+  return cleanText(
+    row?.owner_email || env.CRM_OWNER_EMAIL || COMPANY.email || "brad@vanderven.ca",
+    160
+  ).toLowerCase();
+}
+
 async function notifyQuoteOwnerDecision(env, row, { action, signedName }) {
-  const toEmail = cleanText(row.owner_email || env.CRM_OWNER_EMAIL || "", 160).toLowerCase();
+  const toEmail = quoteOwnerNotifyEmail(env, row);
   if (!toEmail) return;
   const label = action === "approve" ? "approved and signed" : "declined";
   const subject = `Quote ${row.number} ${label}`;
+  const amount =
+    row.amount_cents != null
+      ? formatCadCents(Number(row.amount_cents) || 0)
+      : "";
   const body = [
-    `Quote ${row.number} — ${row.title}`,
+    `Quote ${row.number} — ${row.title || "Quote"}`,
     `Client: ${row.client_name || "Client"}`,
+    amount ? `Amount: ${amount}` : "",
     `Status: ${label}`,
     action === "approve" && signedName ? `Signed by: ${signedName}` : "",
     "",
-    `Open the CRM Quotes view for details.`,
+    `Open in CRM: /app/#quotes?id=${row.id}`,
     `— ${COMPANY.name}`,
   ]
     .filter(Boolean)
     .join("\n");
   await deliverReminder(env, { toEmail, subject, body });
+}
+
+async function notifyQuoteOwnerFirstView(env, row) {
+  const toEmail = quoteOwnerNotifyEmail(env, row);
+  if (!toEmail) return;
+  const subject = `Quote ${row.number} viewed by client`;
+  const body = [
+    `Your client opened quote ${row.number} for the first time.`,
+    "",
+    `Quote: ${row.title || "Quote"}`,
+    `Client: ${row.client_name || "Client"}`,
+    "",
+    `They have not signed yet — you'll get another email when they approve or decline.`,
+    "",
+    `Open in CRM: /app/#quotes?id=${row.id}`,
+    `— ${COMPANY.name}`,
+  ].join("\n");
+  await deliverReminder(env, { toEmail, subject, body });
+}
+
+/** Record first client open of the public sign link and email the owner once. */
+async function markQuoteClientViewed(env, row) {
+  if (!row?.id || row.client_viewed_at) return row;
+  const openStatuses = new Set(["sent", "revisions_requested", "approved", "declined"]);
+  if (!openStatuses.has(row.status)) return row;
+  const ts = nowIso();
+  try {
+    const result = await env.DB.prepare(
+      `UPDATE quotes
+       SET client_viewed_at = ?, updated_at = ?
+       WHERE id = ? AND (client_viewed_at IS NULL OR client_viewed_at = '')`
+    )
+      .bind(ts, ts, row.id)
+      .run();
+    if (!result.meta?.changes) return row;
+  } catch {
+    return row;
+  }
+  const updated = { ...row, client_viewed_at: ts, updated_at: ts };
+  if (row.lead_id) {
+    try {
+      await recordActivity(env, row.lead_id, {
+        kind: "quote",
+        entityType: "quote",
+        entityId: row.id,
+        summary: `Quote ${row.number} opened by client`,
+        meta: { via: "signature_link", firstView: true },
+        at: ts,
+      });
+    } catch {
+      /* ignore */
+    }
+  }
+  try {
+    await notifyQuoteOwnerFirstView(env, updated);
+  } catch {
+    /* ignore notify failures */
+  }
+  return updated;
+}
+
+async function publicQuotePayloadWithPay(env, row, requestUrl = "") {
+  const payToken = row.pay_token || (await issueEntityPayToken(env, "quotes", row.id));
+  const origin = publicAppOrigin(env, requestUrl);
+  const payUrl = origin && payToken ? `${origin}/pay/q/${encodeURIComponent(payToken)}` : "";
+  const signToken = cleanText(row.sign_token || "", 80);
+  const signUrl = origin && signToken ? `${origin}/sign/q/${encodeURIComponent(signToken)}` : "";
+  const alreadyPaid = await quoteHasActiveDeposit(env, row.id);
+  return publicQuotePayload(row, { payUrl, signUrl, alreadyPaid });
 }
 
 async function signQuotePublic(env, body, request) {
@@ -3839,7 +5905,11 @@ async function signQuotePublic(env, body, request) {
   if (!row) return { error: "This signing link is invalid or expired.", status: 404 };
 
   if (row.status === "approved" || row.status === "declined") {
-    return { ok: true, alreadyDone: true, quote: publicQuotePayload(row) };
+    return {
+      ok: true,
+      alreadyDone: true,
+      quote: await publicQuotePayloadWithPay(env, row, request.url),
+    };
   }
   if (row.status !== "sent" && row.status !== "revisions_requested") {
     return { error: "This quote is not open for signature.", status: 400 };
@@ -3871,7 +5941,7 @@ async function signQuotePublic(env, body, request) {
     } catch {
       /* ignore notify failures */
     }
-    return { ok: true, quote: publicQuotePayload(updated || row) };
+    return { ok: true, quote: await publicQuotePayloadWithPay(env, updated || row, request.url) };
   }
 
   const signedName = cleanText(body.signedName ?? body.signed_name, 120);
@@ -3917,7 +5987,22 @@ async function signQuotePublic(env, body, request) {
   } catch {
     /* ignore */
   }
-  return { ok: true, quote: publicQuotePayload(updated || row) };
+  return { ok: true, quote: await publicQuotePayloadWithPay(env, updated || row, request.url) };
+}
+
+/** Distinctive base so the first quote isn't Q-1 — easy to spot in search/lists. */
+const QUOTE_NUMBER_START = 4827;
+
+async function nextQuoteNumber(env) {
+  const rows = await env.DB.prepare("SELECT number FROM quotes").all();
+  let max = QUOTE_NUMBER_START - 1;
+  for (const row of rows.results || []) {
+    const match = String(row.number || "").match(/^Q-(\d+)$/i);
+    if (!match) continue;
+    const n = Number(match[1]);
+    if (Number.isFinite(n)) max = Math.max(max, n);
+  }
+  return `Q-${max + 1}`;
 }
 
 async function createQuote(env, body) {
@@ -3933,33 +6018,70 @@ async function createQuote(env, body) {
   const id = newId("quote");
   const ts = nowIso();
   const settings = await ensureReminderSettings(env);
-  const count = await env.DB.prepare("SELECT COUNT(*) AS c FROM quotes").first();
-  const number = cleanText(body.number, 40) || `Q-${1040 + Number(count?.c || 0) + 1}`;
+  const number = await nextQuoteNumber(env);
   const ownerEmail =
     cleanText(body.ownerEmail ?? body.owner_email, 160) || settings.ownerEmail || "";
   const sentAt = status === "sent" ? ts : null;
-  await env.DB.prepare(
-    `INSERT INTO quotes
-      (id, lead_id, number, title, client_name, status, amount_cents, notes, sent_at, owner_email, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  )
-    .bind(
-      id,
-      leadId,
-      number,
-      title,
-      cleanText(body.clientName ?? body.client_name, 160),
-      status,
-      body.amountCents !== undefined || body.amount_cents !== undefined
-        ? moneyToCents(body.amountCents ?? body.amount_cents, { alreadyCents: true })
-        : moneyToCents(body.amount),
-      cleanText(body.notes, 4000),
-      sentAt,
-      ownerEmail,
-      ts,
-      ts
+  const pricing = resolveQuotePricing(body, null);
+  const depositCents = resolveQuoteDepositCents(body, pricing.amountCents, null);
+  try {
+    await env.DB.prepare(
+      `INSERT INTO quotes
+        (id, lead_id, number, title, client_name, status, amount_cents, deposit_cents, notes, terms, addendums,
+         line_items_json, discount_cents, discount_label, discount_note, sent_at, owner_email, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
-    .run();
+      .bind(
+        id,
+        leadId,
+        number,
+        title,
+        cleanText(body.clientName ?? body.client_name, 160),
+        status,
+        pricing.amountCents,
+        depositCents,
+        cleanText(body.notes, 4000),
+        pricing.terms,
+        pricing.addendums,
+        JSON.stringify(pricing.lineItems),
+        pricing.discountCents,
+        pricing.discountLabel,
+        pricing.discountNote,
+        sentAt,
+        ownerEmail,
+        ts,
+        ts
+      )
+      .run();
+  } catch {
+    await env.DB.prepare(
+      `INSERT INTO quotes
+        (id, lead_id, number, title, client_name, status, amount_cents, notes, terms, addendums,
+         line_items_json, discount_cents, discount_label, discount_note, sent_at, owner_email, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+      .bind(
+        id,
+        leadId,
+        number,
+        title,
+        cleanText(body.clientName ?? body.client_name, 160),
+        status,
+        pricing.amountCents,
+        cleanText(body.notes, 4000),
+        pricing.terms,
+        pricing.addendums,
+        JSON.stringify(pricing.lineItems),
+        pricing.discountCents,
+        pricing.discountLabel,
+        pricing.discountNote,
+        sentAt,
+        ownerEmail,
+        ts,
+        ts
+      )
+      .run();
+  }
   const documentIds =
     body.documentIds !== undefined || body.document_ids !== undefined
       ? body.documentIds ?? body.document_ids
@@ -3998,6 +6120,8 @@ async function updateQuote(env, id, body) {
   if (status === "sent" && !sentAt) sentAt = nowIso();
   if (status === "draft") sentAt = existing.sent_at || null;
 
+  const pricing = resolveQuotePricing(body, existing);
+  const depositCents = resolveQuoteDepositCents(body, pricing.amountCents, existing);
   const updated = {
     lead_id:
       body.leadId !== undefined || body.lead_id !== undefined
@@ -4010,13 +6134,15 @@ async function updateQuote(env, id, body) {
         ? cleanText(body.clientName ?? body.client_name, 160)
         : existing.client_name,
     status,
-    amount_cents:
-      body.amountCents !== undefined || body.amount_cents !== undefined
-        ? moneyToCents(body.amountCents ?? body.amount_cents, { alreadyCents: true })
-        : body.amount !== undefined
-          ? moneyToCents(body.amount)
-          : existing.amount_cents,
+    amount_cents: pricing.amountCents,
+    deposit_cents: depositCents,
     notes: body.notes !== undefined ? cleanText(body.notes, 4000) : existing.notes,
+    terms: pricing.terms,
+    addendums: pricing.addendums,
+    line_items_json: JSON.stringify(pricing.lineItems),
+    discount_cents: pricing.discountCents,
+    discount_label: pricing.discountLabel,
+    discount_note: pricing.discountNote,
     sent_at: sentAt,
     owner_email:
       body.ownerEmail !== undefined || body.owner_email !== undefined
@@ -4024,26 +6150,66 @@ async function updateQuote(env, id, body) {
         : existing.owner_email || "",
     updated_at: nowIso(),
   };
-  await env.DB.prepare(
-    `UPDATE quotes SET
-      lead_id = ?, number = ?, title = ?, client_name = ?, status = ?, amount_cents = ?,
-      notes = ?, sent_at = ?, owner_email = ?, updated_at = ?
-     WHERE id = ?`
-  )
-    .bind(
-      updated.lead_id,
-      updated.number,
-      updated.title,
-      updated.client_name,
-      updated.status,
-      updated.amount_cents,
-      updated.notes,
-      updated.sent_at,
-      updated.owner_email,
-      updated.updated_at,
-      id
+  try {
+    await env.DB.prepare(
+      `UPDATE quotes SET
+        lead_id = ?, number = ?, title = ?, client_name = ?, status = ?, amount_cents = ?, deposit_cents = ?,
+        notes = ?, terms = ?, addendums = ?, line_items_json = ?,
+        discount_cents = ?, discount_label = ?, discount_note = ?,
+        sent_at = ?, owner_email = ?, updated_at = ?
+       WHERE id = ?`
     )
-    .run();
+      .bind(
+        updated.lead_id,
+        updated.number,
+        updated.title,
+        updated.client_name,
+        updated.status,
+        updated.amount_cents,
+        updated.deposit_cents,
+        updated.notes,
+        updated.terms,
+        updated.addendums,
+        updated.line_items_json,
+        updated.discount_cents,
+        updated.discount_label,
+        updated.discount_note,
+        updated.sent_at,
+        updated.owner_email,
+        updated.updated_at,
+        id
+      )
+      .run();
+  } catch {
+    await env.DB.prepare(
+      `UPDATE quotes SET
+        lead_id = ?, number = ?, title = ?, client_name = ?, status = ?, amount_cents = ?,
+        notes = ?, terms = ?, addendums = ?, line_items_json = ?,
+        discount_cents = ?, discount_label = ?, discount_note = ?,
+        sent_at = ?, owner_email = ?, updated_at = ?
+       WHERE id = ?`
+    )
+      .bind(
+        updated.lead_id,
+        updated.number,
+        updated.title,
+        updated.client_name,
+        updated.status,
+        updated.amount_cents,
+        updated.notes,
+        updated.terms,
+        updated.addendums,
+        updated.line_items_json,
+        updated.discount_cents,
+        updated.discount_label,
+        updated.discount_note,
+        updated.sent_at,
+        updated.owner_email,
+        updated.updated_at,
+        id
+      )
+      .run();
+  }
   if (body.documentIds !== undefined || body.document_ids !== undefined) {
     await setQuoteDocumentIds(env, id, body.documentIds ?? body.document_ids);
   }
@@ -4067,27 +6233,84 @@ async function sendQuote(env, id, requestUrl, senderUser = null) {
   if (!quote.leadId) {
     return { error: "Link a client before sending this quote.", status: 400 };
   }
+  if (quote.status === "approved") {
+    return {
+      error:
+        "This quote is already approved and signed. Don’t Send again — that would reopen signing. Use Copy pay link if they still need to pay.",
+      status: 400,
+    };
+  }
+  if (quote.status === "declined") {
+    return {
+      error: "This quote was declined. Duplicate it or create a new quote to send another offer.",
+      status: 400,
+    };
+  }
+  if (quote.alreadyPaid || (Number(quote.depositPaidCents) || 0) > 0) {
+    return {
+      error: "A deposit is already on file for this quote. Don’t Send again.",
+      status: 400,
+    };
+  }
   const lead = await env.DB.prepare("SELECT * FROM leads WHERE id = ?").bind(quote.leadId).first();
   const toEmail = cleanText(lead?.email || "", 160).toLowerCase();
   if (!toEmail) {
     return { error: "Add an email on the client before sending the quote.", status: 400 };
   }
 
-  const signToken = await issueQuoteSignToken(env, id);
+  // Reuse the existing sign token on resend so older email links keep working.
+  // Never clear a signature here (approved is blocked above).
+  const signToken = await ensureQuoteSignToken(env, quote);
   if (!signToken) {
     return {
       error: "Quote signing is not ready yet. Apply database migrations and try again.",
       status: 503,
     };
   }
+  const payToken = await issueEntityPayToken(env, "quotes", id);
 
   const documents = await documentsForQuote(env, quote);
-  const origin = requestUrl ? new URL(requestUrl).origin : "";
-  const logoUrl = origin ? `${origin}/public/logo-mark-nav.png` : "";
+  const fileRows = await env.DB.prepare("SELECT * FROM quote_files WHERE quote_id = ?")
+    .bind(id)
+    .all()
+    .then((r) => r.results || [])
+    .catch(() => []);
+  const origin = publicAppOrigin(env, requestUrl);
+  const logoInline = await logoInlineAttachment(env);
+  const logoUrl = logoInline
+    ? "cid:vds-logo"
+    : origin
+      ? `${origin}/public/logo-mark-nav-transparent.png`
+      : "";
   const signUrl = origin ? `${origin}/sign/q/${encodeURIComponent(signToken)}` : "";
-  const html = buildQuoteLetterheadHtml(quote, documents, { absoluteLogoUrl: logoUrl, signUrl });
-  const text = buildQuotePlainText(quote, documents, { signUrl });
-  const attachments = documents.map(documentAttachmentPayload);
+  const payUrl =
+    origin && payToken ? `${origin}/pay/q/${encodeURIComponent(payToken)}` : "";
+  const customDocs = fileRows.map((row) => ({
+    title: row.file_name,
+    summary: "Additional attachment",
+    kind: "file",
+  }));
+  const html = buildQuoteLetterheadHtml(quote, [...documents, ...customDocs], {
+    absoluteLogoUrl: logoUrl,
+    signUrl,
+    payUrl,
+  });
+  const text = buildQuotePlainText(quote, [...documents, ...customDocs], { signUrl, payUrl });
+  const libraryAttachments = await Promise.all(
+    documents.map((doc) => documentAttachmentPayload(env, doc, requestUrl))
+  );
+  const missingDoc = libraryAttachments.find((item) => item?.error);
+  if (missingDoc) {
+    return { error: missingDoc.error, status: missingDoc.status || 502 };
+  }
+  const uploadedAttachments = (
+    await Promise.all(fileRows.map((row) => quoteFileAttachmentPayload(env, row)))
+  ).filter(Boolean);
+  const attachments = [
+    ...libraryAttachments,
+    ...uploadedAttachments,
+    ...(logoInline ? [logoInline] : []),
+  ];
   const delivery = await deliverReminder(env, {
     toEmail,
     subject: `Quote ${quote.number} from ${COMPANY.name} — review & sign`,
@@ -4119,10 +6342,11 @@ async function sendQuote(env, id, requestUrl, senderUser = null) {
       at: nowIso(),
     });
   }
-  return { quote: result.quote, delivery, documents, signUrl };
+  return { quote: result.quote, delivery, documents, signUrl, payUrl };
 }
 
 async function deleteQuote(env, id) {
+  await deleteQuoteFilesForQuote(env, id);
   const result = await env.DB.prepare("DELETE FROM quotes WHERE id = ?").bind(id).run();
   if (!result.meta?.changes) return { error: "Quote not found.", status: 404 };
   return { ok: true };
@@ -4139,12 +6363,13 @@ async function listInvoices(env, { status } = {}) {
   const result = await env.DB.prepare(sql)
     .bind(...binds)
     .all();
-  return (result.results || []).map(rowToInvoice);
+  const invoices = (result.results || []).map(rowToInvoice);
+  return Promise.all(invoices.map((invoice) => enrichInvoicePayments(env, invoice)));
 }
 
 async function getInvoice(env, id) {
   const row = await env.DB.prepare("SELECT * FROM invoices WHERE id = ?").bind(id).first();
-  return row ? rowToInvoice(row) : null;
+  return row ? enrichInvoicePayments(env, rowToInvoice(row)) : null;
 }
 
 async function createInvoice(env, body) {
@@ -4341,8 +6566,17 @@ async function updateInvoice(env, id, body) {
       id
     )
     .run();
-  const invoice = await getInvoice(env, id);
+  let invoice = await getInvoice(env, id);
   if (invoice?.leadId && existing.status !== invoice.status) {
+    if (invoice.status === "paid") {
+      await applyReceivedDepositsToInvoice(
+        env,
+        invoice.leadId,
+        invoice.id,
+        invoice.amountCents || 0
+      );
+      invoice = await getInvoice(env, id);
+    }
     await recordActivity(env, invoice.leadId, {
       kind: "invoice",
       entityType: "invoice",
@@ -4362,15 +6596,24 @@ async function sendInvoice(env, id, requestUrl, senderUser = null) {
   if (!toEmail) {
     return { error: "Add a bill-to email before sending.", status: 400 };
   }
-  const origin = requestUrl ? new URL(requestUrl).origin : "";
-  const logoUrl = origin ? `${origin}/public/logo-mark-nav.png` : "";
-  const html = buildInvoiceLetterheadHtml(invoice, { absoluteLogoUrl: logoUrl });
-  const text = buildInvoicePlainText(invoice);
+  const payToken = await issueEntityPayToken(env, "invoices", id);
+  const origin = publicAppOrigin(env, requestUrl);
+  const logoInline = await logoInlineAttachment(env);
+  const logoUrl = logoInline
+    ? "cid:vds-logo"
+    : origin
+      ? `${origin}/public/logo-mark-nav-transparent.png`
+      : "";
+  const payUrl =
+    origin && payToken ? `${origin}/pay/i/${encodeURIComponent(payToken)}` : "";
+  const html = buildInvoiceLetterheadHtml(invoice, { absoluteLogoUrl: logoUrl, payUrl });
+  const text = buildInvoicePlainText(invoice, { payUrl });
   const delivery = await deliverReminder(env, {
     toEmail,
     subject: `Invoice ${invoice.number} from ${COMPANY.name}`,
     body: text,
     html,
+    attachments: logoInline ? [logoInline] : [],
     from: formatOutboundFrom(senderUser, env),
     replyTo: senderUser?.email || "",
   });
@@ -4385,11 +6628,11 @@ async function sendInvoice(env, id, requestUrl, senderUser = null) {
       entityType: "invoice",
       entityId: result.invoice.id,
       summary: `Invoice ${result.invoice.number} sent to ${toEmail}`,
-      meta: { channel: delivery.channel, status: delivery.status },
+      meta: { channel: delivery.channel, status: delivery.status, payUrl: Boolean(payUrl) },
       at: nowIso(),
     });
   }
-  return { invoice: result.invoice, delivery };
+  return { invoice: result.invoice, delivery, payUrl };
 }
 
 async function deleteInvoice(env, id) {
@@ -5151,9 +7394,10 @@ async function handleApi(request, env) {
   // Public quote signing preview
   if (path === "/api/public/quotes/sign-preview" && method === "GET") {
     const token = url.searchParams.get("token") || "";
-    const row = await getQuoteBySignToken(env, token);
+    let row = await getQuoteBySignToken(env, token);
     if (!row) return json({ error: "This signing link is invalid or expired." }, { status: 404 });
-    return json({ quote: publicQuotePayload(row) });
+    row = (await markQuoteClientViewed(env, row)) || row;
+    return json({ quote: await publicQuotePayloadWithPay(env, row, request.url) });
   }
 
   if (path === "/api/public/quotes/sign" && method === "POST") {
@@ -5168,6 +7412,59 @@ async function handleApi(request, env) {
       return json({ error: result.error }, { status: result.status || 400 });
     }
     return json(result);
+  }
+
+  if (path === "/api/public/pay/quote" && method === "GET") {
+    const result = await publicPayPreview(env, "quote", url.searchParams.get("token") || "", request.url);
+    if (result.error) return json({ error: result.error }, { status: result.status || 400 });
+    return json({ pay: result });
+  }
+
+  if (path === "/api/public/pay/invoice" && method === "GET") {
+    const result = await publicPayPreview(env, "invoice", url.searchParams.get("token") || "", request.url);
+    if (result.error) return json({ error: result.error }, { status: result.status || 400 });
+    return json({ pay: result });
+  }
+
+  if (path === "/api/public/pay/checkout" && method === "POST") {
+    let body;
+    try {
+      body = await request.json();
+    } catch {
+      return badRequest("Invalid JSON body.");
+    }
+    const result = await startPublicCheckout(env, body, request.url);
+    if (result.error) {
+      return json(
+        {
+          error: result.error,
+          needsSignature: Boolean(result.needsSignature),
+          signUrl: result.signUrl || "",
+        },
+        { status: result.status || 400 }
+      );
+    }
+    return json(result);
+  }
+
+  if (path === "/api/stripe/webhook" && method === "POST") {
+    const rawBody = await request.text();
+    const verified = await verifyStripeWebhook(
+      env,
+      rawBody,
+      request.headers.get("stripe-signature")
+    );
+    if (verified.error) {
+      return json({ error: verified.error }, { status: verified.status || 400 });
+    }
+    const event = verified.event;
+    if (event?.type === "checkout.session.completed") {
+      const result = await handleStripeCheckoutCompleted(env, event.data?.object || {});
+      if (result.error) {
+        return json({ error: result.error }, { status: result.status || 400 });
+      }
+    }
+    return json({ received: true });
   }
 
   // Public home-page concierge (Vera)
@@ -5440,6 +7737,94 @@ async function handleAuthedApi(request, env, sessionUser, url, path, method) {
     return json(detail);
   }
 
+  const leadDepositsMatch = path.match(/^\/api\/leads\/([^/]+)\/deposits$/);
+  if (leadDepositsMatch) {
+    const leadId = decodeURIComponent(leadDepositsMatch[1]);
+    if (method === "GET") {
+      const deposits = await listDepositsForLead(env, leadId);
+      const depositAvailableCents = await availableDepositCents(env, leadId);
+      return json({ deposits, depositAvailableCents });
+    }
+    if (method === "POST") {
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return badRequest("Invalid JSON body.");
+      }
+      const result = await createManualDeposit(env, leadId, body);
+      if (result.error) return json({ error: result.error }, { status: result.status || 400 });
+      const detail = await getLeadDetail(env, leadId);
+      return json({ deposit: result.deposit, detail }, { status: 201 });
+    }
+  }
+
+  const depositMatch = path.match(/^\/api\/deposits\/([^/]+)$/);
+  if (depositMatch) {
+    const id = decodeURIComponent(depositMatch[1]);
+    if (method === "PATCH") {
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return badRequest("Invalid JSON body.");
+      }
+      const result = await updateDeposit(env, id, body);
+      if (result.error) return json({ error: result.error }, { status: result.status || 400 });
+      const detail = result.deposit?.leadId
+        ? await getLeadDetail(env, result.deposit.leadId)
+        : null;
+      return json({ deposit: result.deposit, detail });
+    }
+    if (method === "DELETE") {
+      const row = await env.DB.prepare("SELECT lead_id FROM client_deposits WHERE id = ?")
+        .bind(id)
+        .first();
+      const result = await deleteDeposit(env, id);
+      if (result.error) return json({ error: result.error }, { status: result.status || 400 });
+      const detail = row?.lead_id ? await getLeadDetail(env, row.lead_id) : null;
+      return json({ ok: true, detail });
+    }
+  }
+
+  const quotePayLinkMatch = path.match(/^\/api\/quotes\/([^/]+)\/pay-link$/);
+  if (quotePayLinkMatch && method === "POST") {
+    const id = decodeURIComponent(quotePayLinkMatch[1]);
+    const quote = await getQuote(env, id);
+    if (!quote) return json({ error: "Quote not found." }, { status: 404 });
+    if (!quote.leadId) {
+      return json({ error: "Link a client before creating a pay link.", status: 400 });
+    }
+    const token = await issueEntityPayToken(env, "quotes", id);
+    if (!token) {
+      return json({ error: "Pay links need migration 0029 applied." }, { status: 503 });
+    }
+    const origin = publicAppOrigin(env, request.url);
+    return json({
+      token,
+      payUrl: `${origin}/pay/q/${encodeURIComponent(token)}`,
+    });
+  }
+
+  const invoicePayLinkMatch = path.match(/^\/api\/invoices\/([^/]+)\/pay-link$/);
+  if (invoicePayLinkMatch && method === "POST") {
+    const id = decodeURIComponent(invoicePayLinkMatch[1]);
+    const invoice = await getInvoice(env, id);
+    if (!invoice) return json({ error: "Invoice not found." }, { status: 404 });
+    if (!invoice.leadId) {
+      return json({ error: "Link a client before creating a pay link.", status: 400 });
+    }
+    const token = await issueEntityPayToken(env, "invoices", id);
+    if (!token) {
+      return json({ error: "Pay links need migration 0029 applied." }, { status: 503 });
+    }
+    const origin = publicAppOrigin(env, request.url);
+    return json({
+      token,
+      payUrl: `${origin}/pay/i/${encodeURIComponent(token)}`,
+    });
+  }
+
   const leadNotesMatch = path.match(/^\/api\/leads\/([^/]+)\/notes$/);
   if (leadNotesMatch && method === "POST") {
     const id = decodeURIComponent(leadNotesMatch[1]);
@@ -5621,6 +8006,49 @@ async function handleAuthedApi(request, env, sessionUser, url, path, method) {
       delivery: result.delivery,
       documents: result.documents,
     });
+  }
+
+  const quoteFileMatch = path.match(/^\/api\/quotes\/([^/]+)\/files(?:\/([^/]+))?$/);
+  if (quoteFileMatch) {
+    const quoteId = decodeURIComponent(quoteFileMatch[1]);
+    const fileId = quoteFileMatch[2] ? decodeURIComponent(quoteFileMatch[2]) : "";
+    if (!fileId && method === "GET") {
+      const quote = await getQuote(env, quoteId);
+      if (!quote) return json({ error: "Quote not found." }, { status: 404 });
+      return json({ files: quote.files || [] });
+    }
+    if (!fileId && method === "POST") {
+      let form;
+      try {
+        form = await request.formData();
+      } catch {
+        return badRequest("Expected multipart form upload.");
+      }
+      const file = form.get("file");
+      const result = await uploadQuoteFile(env, quoteId, file);
+      if (result.error) return json({ error: result.error }, { status: result.status || 400 });
+      return json({ file: result.file }, { status: 201 });
+    }
+    if (fileId && method === "GET") {
+      const row = await getQuoteFileRow(env, quoteId, fileId);
+      if (!row) return json({ error: "File not found." }, { status: 404 });
+      if (!env.CALL_AUDIO) return json({ error: "File storage unavailable." }, { status: 503 });
+      const object = await env.CALL_AUDIO.get(row.r2_key);
+      if (!object) return json({ error: "File missing from storage." }, { status: 404 });
+      const headers = new Headers();
+      headers.set("Content-Type", row.content_type || "application/octet-stream");
+      headers.set(
+        "Content-Disposition",
+        `inline; filename="${String(row.file_name || "attachment").replace(/"/g, "")}"`
+      );
+      if (row.byte_size) headers.set("Content-Length", String(row.byte_size));
+      return new Response(object.body, { headers });
+    }
+    if (fileId && method === "DELETE") {
+      const result = await deleteQuoteFile(env, quoteId, fileId);
+      if (result.error) return json({ error: result.error }, { status: result.status || 400 });
+      return json({ ok: true });
+    }
   }
 
   const quoteMatch = path.match(/^\/api\/quotes\/([^/]+)$/);
@@ -5818,6 +8246,22 @@ export default {
       }
       if (pathname === "/sign/quote" || pathname === "/sign/quote.html") {
         return serveAsset(request, env, "/sign/quote");
+      }
+
+      // Public pay pages
+      const quotePayMatch = pathname.match(/^\/pay\/q\/([^/]+)\/?$/);
+      if (quotePayMatch) {
+        return serveAsset(request, env, "/sign/pay-quote");
+      }
+      const invoicePayMatch = pathname.match(/^\/pay\/i\/([^/]+)\/?$/);
+      if (invoicePayMatch) {
+        return serveAsset(request, env, "/sign/pay-invoice");
+      }
+      if (pathname === "/sign/pay-quote" || pathname === "/sign/pay-quote.html") {
+        return serveAsset(request, env, "/sign/pay-quote");
+      }
+      if (pathname === "/sign/pay-invoice" || pathname === "/sign/pay-invoice.html") {
+        return serveAsset(request, env, "/sign/pay-invoice");
       }
 
       if (pathname === "/app" || pathname === "/app/" || pathname.startsWith("/app/")) {

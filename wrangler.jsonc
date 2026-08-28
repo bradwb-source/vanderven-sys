@@ -3,6 +3,8 @@
   "name": "vanderven-sys",
   "main": "src/worker.js",
   "compatibility_date": "2026-07-21",
+  "workers_dev": true,
+  "preview_urls": true,
   "observability": {
     "enabled": true
   },
@@ -17,7 +19,9 @@
       "/app",
       "/app/*",
       "/sign",
-      "/sign/*"
+      "/sign/*",
+      "/pay",
+      "/pay/*"
     ]
   },
   "d1_databases": [
@@ -41,5 +45,23 @@
   "triggers": {
     // Daily quote reminder sweep (UTC).
     "crons": ["0 15 * * *"]
+  },
+  // Public hostnames for this Worker (marketing site + CRM/sign/pay).
+  "routes": [
+    {
+      "pattern": "vanderven.ca",
+      "custom_domain": true
+    },
+    {
+      "pattern": "www.vanderven.ca",
+      "custom_domain": true
+    },
+    {
+      "pattern": "app.vanderven.ca",
+      "custom_domain": true
+    }
+  ],
+  "vars": {
+    "PUBLIC_APP_ORIGIN": "https://app.vanderven.ca"
   }
 }
