@@ -3650,6 +3650,14 @@
       controls: "Left/Right or mouse · Space / click to serve",
     },
     {
+      id: "donkey-kong",
+      title: "Donkey Kong",
+      blurb: "Climb the girders, dodge barrels, rescue the prize.",
+      tone: "rust",
+      cover: "/app/games/covers/donkey-kong.jpg",
+      controls: "Left/Right move · Up/Down ladders · Space jump",
+    },
+    {
       id: "missile-command",
       title: "Missile Command",
       blurb: "Defend the cities from inbound warheads.",

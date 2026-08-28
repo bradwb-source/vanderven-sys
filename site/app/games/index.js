@@ -1,5 +1,6 @@
 import { mountAsteroids } from "./asteroids.js";
 import { mountBreakout } from "./breakout.js";
+import { mountDonkeyKong } from "./donkey-kong.js";
 import { mountMissileCommand } from "./missile-command.js";
 import { mountPacMan } from "./pac-man.js";
 import { mountPokemonRed } from "./pokemon-red.js";
@@ -10,6 +11,7 @@ import { mountTetris } from "./tetris.js";
 const registry = {
   asteroids: mountAsteroids,
   breakout: mountBreakout,
+  "donkey-kong": mountDonkeyKong,
   "missile-command": mountMissileCommand,
   "pac-man": mountPacMan,
   "pokemon-red": mountPokemonRed,
