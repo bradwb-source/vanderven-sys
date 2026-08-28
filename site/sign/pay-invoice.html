@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Pay invoice — Vanderven Systems</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Outfit:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="icon" href="/public/favicon.ico" />
+    <style>
+      :root {
+        --ink: #141820;
+        --gold: #b8953e;
+        --muted: rgba(28, 36, 48, 0.62);
+        --font-display: "Cormorant Garamond", "Times New Roman", serif;
+        --font-body: "Outfit", "Segoe UI", sans-serif;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: var(--font-body);
+        color: var(--ink);
+        background:
+          radial-gradient(1200px 600px at 10% -10%, rgba(184, 149, 62, 0.18), transparent 55%),
+          linear-gradient(180deg, #f7f2e8 0%, #efe8db 100%);
+      }
+      .wrap { max-width: 640px; margin: 0 auto; padding: 2rem 1.15rem 3rem; }
+      .brand { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1.25rem; }
+      .brand img {
+        width: 56px;
+        height: auto;
+        max-height: 40px;
+        object-fit: contain;
+        display: block;
+      }
+      .brand span { font-family: var(--font-display); font-size: 1.55rem; font-weight: 600; }
+      .card {
+        background: #fffaf3;
+        border: 1px solid #ddd4c4;
+        border-radius: 16px;
+        overflow: hidden;
+        box-shadow: 0 18px 50px rgba(20, 24, 32, 0.08);
+      }
+      .hero {
+        padding: 1.6rem 1.5rem 1.35rem;
+        background: linear-gradient(135deg, #1c2430 0%, #2d3a4a 55%, #3d3424 100%);
+        color: #f7f1e6;
+      }
+      .hero .eyebrow {
+        font-size: 0.72rem;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        opacity: 0.75;
+      }
+      .hero h1 {
+        margin: 0.35rem 0 0;
+        font-family: var(--font-display);
+        font-size: clamp(1.7rem, 4vw, 2.2rem);
+        font-weight: 600;
+      }
+      .body { padding: 1.5rem; display: grid; gap: 1rem; }
+      .panel {
+        padding: 1rem 1.1rem;
+        border-radius: 12px;
+        background: #f7f2e8;
+      }
+      .panel h2 {
+        margin: 0 0 0.55rem;
+        font-size: 0.72rem;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: #8a7340;
+      }
+      .row {
+        display: flex;
+        justify-content: space-between;
+        gap: 1rem;
+        font-size: 0.95rem;
+        margin: 0.35rem 0;
+      }
+      .row.total { margin-top: 0.65rem; padding-top: 0.65rem; border-top: 1px solid #e0d6c4; font-weight: 700; }
+      .muted { color: var(--muted); }
+      .btn {
+        appearance: none;
+        border: 0;
+        border-radius: 10px;
+        padding: 0.85rem 1.15rem;
+        font: inherit;
+        font-weight: 650;
+        cursor: pointer;
+        width: 100%;
+      }
+      .btn-primary { background: var(--gold); color: var(--ink); }
+      .btn:disabled { opacity: 0.55; cursor: not-allowed; }
+      .status { padding: 1.5rem; text-align: center; }
+      .status h2 { margin: 0 0 0.5rem; font-family: var(--font-display); font-size: 1.8rem; }
+      .error { color: #7a2e22; font-size: 0.9rem; margin: 0; }
+      .banner {
+        padding: 0.75rem 0.9rem;
+        border-radius: 10px;
+        background: #e8f3ea;
+        color: #1f5c2e;
+        font-size: 0.9rem;
+      }
+      .banner.warn { background: #fde8e4; color: #7a2e22; }
+      [hidden] { display: none !important; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="brand">
+        <img src="/public/logo-mark-nav-transparent.png" alt="Vanderven Systems" width="56" height="33" />
+        <span>Vanderven Systems</span>
+      </div>
+
+      <div id="state-loading" class="card status">
+        <h2>Loading…</h2>
+        <p class="muted">One moment.</p>
+      </div>
+
+      <div id="state-error" class="card status" hidden>
+        <h2>Link unavailable</h2>
+        <p id="error-detail" class="muted">This payment link is invalid or expired.</p>
+      </div>
+
+      <div id="state-form" class="card" hidden>
+        <div class="hero">
+          <div class="eyebrow">Invoice · <span id="p-number"></span></div>
+          <h1 id="p-title"></h1>
+          <p class="muted" style="color: rgba(247,241,230,0.85); margin: 0.75rem 0 0">
+            Bill to <strong id="p-client"></strong>
+          </p>
+        </div>
+        <div class="body">
+          <div id="paid-banner" class="banner" hidden>Payment received — thank you.</div>
+          <div id="cancel-banner" class="banner warn" hidden>Checkout was cancelled. You can try again or pay by e-transfer.</div>
+
+          <div class="panel">
+            <h2>Balance</h2>
+            <div class="row"><span>Invoice total</span><span id="p-amount"></span></div>
+            <div class="row" id="p-deposit-row" hidden><span>Deposit applied</span><span id="p-deposit"></span></div>
+            <div class="row total"><span>Balance due</span><strong id="p-base"></strong></div>
+          </div>
+
+          <div class="panel" id="pay-methods">
+            <h2>Interac e-Transfer · no fee</h2>
+            <p class="muted" style="margin: 0 0 0.55rem; line-height: 1.45">
+              Send the balance to <strong id="p-accounting"></strong>.
+              Use memo <strong id="p-memo"></strong>.
+            </p>
+            <div class="row total"><span>Send</span><strong id="p-etransfer"></strong></div>
+          </div>
+
+          <div class="panel" id="card-panel">
+            <h2>Pay by card · +3.5%</h2>
+            <div class="row"><span>Balance</span><span id="p-card-base"></span></div>
+            <div class="row"><span>Card processing (3.5%)</span><span id="p-card-fee"></span></div>
+            <div class="row total"><span>Card total</span><strong id="p-card-total"></strong></div>
+            <p id="checkout-error" class="error" hidden></p>
+            <button type="button" class="btn btn-primary" id="btn-card" style="margin-top: 0.85rem">
+              Pay balance by card
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      (function () {
+        const token =
+          (location.pathname.match(/\/pay\/i\/([^/]+)\/?$/) || [])[1] ||
+          new URLSearchParams(location.search).get("token") ||
+          "";
+        const params = new URLSearchParams(location.search);
+        const els = {
+          loading: document.getElementById("state-loading"),
+          error: document.getElementById("state-error"),
+          errorDetail: document.getElementById("error-detail"),
+          form: document.getElementById("state-form"),
+          number: document.getElementById("p-number"),
+          title: document.getElementById("p-title"),
+          client: document.getElementById("p-client"),
+          amount: document.getElementById("p-amount"),
+          depositRow: document.getElementById("p-deposit-row"),
+          deposit: document.getElementById("p-deposit"),
+          base: document.getElementById("p-base"),
+          accounting: document.getElementById("p-accounting"),
+          memo: document.getElementById("p-memo"),
+          etransfer: document.getElementById("p-etransfer"),
+          cardBase: document.getElementById("p-card-base"),
+          cardFee: document.getElementById("p-card-fee"),
+          cardTotal: document.getElementById("p-card-total"),
+          btnCard: document.getElementById("btn-card"),
+          checkoutError: document.getElementById("checkout-error"),
+          paidBanner: document.getElementById("paid-banner"),
+          cancelBanner: document.getElementById("cancel-banner"),
+          payMethods: document.getElementById("pay-methods"),
+          cardPanel: document.getElementById("card-panel"),
+        };
+
+        function money(cents) {
+          return ((Number(cents) || 0) / 100).toLocaleString("en-CA", {
+            style: "currency",
+            currency: "CAD",
+          });
+        }
+
+        function show(which) {
+          els.loading.hidden = which !== "loading";
+          els.error.hidden = which !== "error";
+          els.form.hidden = which !== "form";
+        }
+
+        async function load() {
+          if (!token) {
+            els.errorDetail.textContent = "Missing payment token.";
+            show("error");
+            return;
+          }
+          try {
+            const res = await fetch(`/api/public/pay/invoice?token=${encodeURIComponent(token)}`);
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || "Could not load payment details");
+            const pay = data.pay;
+            els.number.textContent = pay.number || "";
+            els.title.textContent = pay.title || "Invoice";
+            els.client.textContent = pay.clientName || "Client";
+            els.amount.textContent = money(pay.amountCents);
+            if (Number(pay.depositAvailableCents) > 0) {
+              els.depositRow.hidden = false;
+              els.deposit.textContent = `−${money(pay.depositAvailableCents)}`;
+            }
+            els.base.textContent = money(pay.baseCents);
+            els.etransfer.textContent = money(pay.baseCents);
+            els.cardBase.textContent = money(pay.baseCents);
+            els.cardFee.textContent = money(pay.cardFeeCents);
+            els.cardTotal.textContent = money(pay.cardTotalCents);
+            els.accounting.textContent = pay.accountingEmail || "accounting@vanderven.ca";
+            els.memo.textContent = pay.number || "your invoice number";
+            if (params.get("paid") === "1" || pay.alreadyPaid) {
+              els.paidBanner.hidden = false;
+              els.paidBanner.textContent = pay.alreadyPaid
+                ? "This invoice is paid — nothing left owing."
+                : "Payment received — thank you.";
+              els.payMethods.hidden = pay.alreadyPaid;
+              els.cardPanel.hidden = pay.alreadyPaid;
+            }
+            if (params.get("cancelled") === "1") els.cancelBanner.hidden = false;
+            show("form");
+          } catch (err) {
+            els.errorDetail.textContent = err.message || "Link unavailable";
+            show("error");
+          }
+        }
+
+        els.btnCard.addEventListener("click", async () => {
+          els.checkoutError.hidden = true;
+          els.btnCard.disabled = true;
+          try {
+            const res = await fetch("/api/public/pay/checkout", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ kind: "invoice", token }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || "Could not start checkout");
+            location.href = data.url;
+          } catch (err) {
+            els.checkoutError.textContent = err.message || "Checkout failed";
+            els.checkoutError.hidden = false;
+            els.btnCard.disabled = false;
+          }
+        });
+
+        load();
+      })();
+    </script>
+</body>
+</html>
