@@ -34,6 +34,10 @@ function platformLayout(w, h, dpr) {
 }
 
 export function mountDonkeyKong(root) {
+  root.style.position = "relative";
+  root.style.width = "100%";
+  root.style.height = "100%";
+  root.style.minHeight = "inherit";
   const canvas = document.createElement("canvas");
   const hud = document.createElement("div");
   hud.className = "games-hud";

@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Games preview</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Outfit:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/app/app.css" />
+    <style>
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: var(--bg, #0b1016);
+      }
+      .preview-shell {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 1.25rem 1rem 2rem;
+      }
+      .preview-shell h1 {
+        margin: 0 0 0.25rem;
+        font: 600 1.35rem/1.2 Outfit, sans-serif;
+        color: var(--ink, #e8edf5);
+      }
+      .preview-shell p {
+        margin: 0 0 1rem;
+        color: rgba(232, 237, 245, 0.72);
+      }
+      #view-games:not([hidden]) {
+        display: block;
+      }
+    </style>
+  </head>
+  <body class="app-body">
+    <div class="preview-shell">
+      <h1>Games library</h1>
+      <p>Preview — same tiles as CRM. Click Donkey Kong to play.</p>
+      <section id="view-games" aria-label="Games"></section>
+    </div>
+    <script type="module">
+      import { mountGame } from "./index.js";
+
+      const GAMES = [
+        {
+          id: "donkey-kong",
+          title: "Donkey Kong",
+          blurb: "Climb the girders, dodge barrels, rescue the prize.",
+          tone: "rust",
+          cover: "/app/games/covers/donkey-kong.jpg",
+          controls: "Left/Right move · Up/Down ladders · Space jump",
+        },
+        {
+          id: "pac-man",
+          title: "Pac-Man",
+          blurb: "Eat the pellets. Don’t get ghosted.",
+          tone: "gold",
+          cover: "/app/games/covers/pac-man.jpg",
+          controls: "Arrow keys",
+        },
+        {
+          id: "tetris",
+          title: "Tetris",
+          blurb: "Rotate, drop, and clear the lines.",
+          tone: "slate",
+          cover: "/app/games/covers/tetris.jpg",
+          controls: "Arrows + Space",
+        },
+      ];
+
+      const root = document.getElementById("view-games");
+      let activeId = null;
+      let handle = null;
+
+      function escapeHtml(s) {
+        return String(s)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;");
+      }
+
+      async function openGame(id) {
+        const game = GAMES.find((g) => g.id === id);
+        if (!game) return;
+        if (handle?.destroy) {
+          try {
+            await handle.destroy();
+          } catch (_) {}
+        }
+        handle = null;
+        activeId = id;
+        root.innerHTML = `
+          <div class="games-player">
+            <div class="games-player__bar">
+              <button type="button" class="btn btn-soft games-back-btn" data-back>Back to library</button>
+              <div class="games-player__meta">
+                <strong>${escapeHtml(game.title)}</strong>
+                <p>${escapeHtml(game.controls)}</p>
+              </div>
+            </div>
+            <div class="games-player__stage" id="games-stage" tabindex="0"></div>
+          </div>`;
+        root.querySelector("[data-back]").addEventListener("click", () => {
+          activeId = null;
+          if (handle?.destroy) handle.destroy();
+          handle = null;
+          renderLibrary();
+        });
+        const stage = root.querySelector("#games-stage");
+        handle = await mountGame(id, stage);
+        stage.focus();
+      }
+
+      function renderLibrary() {
+        activeId = null;
+        root.innerHTML = `
+          <div class="games-library">
+            <p class="games-library__lead">Pick a title. Donkey Kong is the new one.</p>
+            <div class="games-grid">
+              ${GAMES.map(
+                (g) => `
+                <button type="button" class="games-tile tone-${g.tone}" data-open="${g.id}">
+                  <span class="games-tile__media">
+                    <img src="${g.cover}" alt="" loading="lazy" width="640" height="480" />
+                  </span>
+                  <span class="games-tile__body">
+                    <span class="games-tile__eyebrow">Play</span>
+                    <strong>${escapeHtml(g.title)}</strong>
+                    <span class="games-tile__blurb">${escapeHtml(g.blurb)}</span>
+                  </span>
+                </button>`
+              ).join("")}
+            </div>
+          </div>`;
+        root.querySelectorAll("[data-open]").forEach((btn) => {
+          btn.addEventListener("click", () => openGame(btn.dataset.open));
+        });
+      }
+
+      renderLibrary();
+      if (new URLSearchParams(location.search).get("play") === "donkey-kong") {
+        openGame("donkey-kong");
+      }
+    </script>
+  </body>
+</html>
